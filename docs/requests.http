@@ -1,0 +1,27 @@
+@auth=http://localhost:3001
+@vehicles=http://localhost:3002
+@token=PEGAR_TOKEN
+
+### Login
+POST {{auth}}/api/auth/login
+Content-Type: application/json
+
+{"correo":"admin@local.test","password":"Admin123*"}
+
+### Perfil
+GET {{auth}}/api/auth/profile
+Authorization: Bearer {{token}}
+
+### Crear propietario
+POST {{vehicles}}/api/propietarios
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"tipo":"INDIVIDUAL","nombre":"Cliente Demo","telefono":"55550000","correo":"cliente@example.com","direccion":"Tactic, Alta Verapaz"}
+
+### Crear vehículo
+POST {{vehicles}}/api/vehiculos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"propietario_id":1,"tipo":"MOTOCICLETA","marca":"Yamaha","modelo":"FZ","anio":2022,"placa":"M123ABC","kilometraje_actual":15000}

@@ -1,0 +1,53 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS roles (
+  id SMALLINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  nombre VARCHAR(30) NOT NULL UNIQUE CHECK (nombre IN ('ADMIN','RECEPCIONISTA'))
+);
+
+CREATE TABLE IF NOT EXISTS usuarios (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  rol_id SMALLINT NOT NULL REFERENCES roles(id),
+  nombre VARCHAR(120) NOT NULL,
+  correo VARCHAR(160) NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS propietarios (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('INDIVIDUAL','EMPRESA')),
+  nombre VARCHAR(150) NOT NULL,
+  telefono VARCHAR(25),
+  correo VARCHAR(160),
+  direccion VARCHAR(250),
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT propietario_contacto_chk CHECK (telefono IS NOT NULL OR correo IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS vehiculos (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  propietario_id BIGINT NOT NULL REFERENCES propietarios(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  tipo VARCHAR(30) NOT NULL,
+  marca VARCHAR(60) NOT NULL,
+  modelo VARCHAR(60) NOT NULL,
+  anio SMALLINT NOT NULL CHECK (anio BETWEEN 1900 AND 2100),
+  placa VARCHAR(20) NOT NULL,
+  kilometraje_actual INTEGER NOT NULL DEFAULT 0 CHECK (kilometraje_actual >= 0),
+  estado VARCHAR(30) NOT NULL DEFAULT 'ACTIVO',
+  observaciones TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vehiculos_placa_upper ON vehiculos (UPPER(placa));
+CREATE INDEX IF NOT EXISTS idx_vehiculos_propietario ON vehiculos(propietario_id);
+
+INSERT INTO roles(nombre) VALUES ('ADMIN'), ('RECEPCIONISTA') ON CONFLICT DO NOTHING;
+INSERT INTO usuarios(rol_id,nombre,correo,password_hash)
+SELECT r.id,'Administrador','admin@local.test',crypt('Admin123*',gen_salt('bf'))
+FROM roles r WHERE r.nombre='ADMIN'
+ON CONFLICT (correo) DO NOTHING;

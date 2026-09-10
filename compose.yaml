@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-control_mantenimiento}
+      POSTGRES_USER: ${POSTGRES_USER:-mantenimiento}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mantenimiento123}
+    ports: ["5432:5432"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mantenimiento} -d ${POSTGRES_DB:-control_mantenimiento}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-fquejq@miumg.edu.gt}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-Admin123*}
+    ports: ["${PGADMIN_PORT:-5050}:80"]
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth-service:
+    build: ./services/auth-service
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mantenimiento}:${POSTGRES_PASSWORD:-mantenimiento123}@postgres:5432/${POSTGRES_DB:-control_mantenimiento}
+      JWT_SECRET: ${JWT_SECRET:-clave_desarrollo_no_usar_en_produccion}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+    ports: ["3001:3001"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  vehicle-service:
+    build: ./services/vehicle-service
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mantenimiento}:${POSTGRES_PASSWORD:-mantenimiento123}@postgres:5432/${POSTGRES_DB:-control_mantenimiento}
+      JWT_SECRET: ${JWT_SECRET:-clave_desarrollo_no_usar_en_produccion}
+    ports: ["3002:3002"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports: ["${FRONTEND_PORT:-3000}:80"]
+    depends_on:
+      auth-service:
+        condition: service_started
+      vehicle-service:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  pgadmin_data:
