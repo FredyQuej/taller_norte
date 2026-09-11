@@ -210,6 +210,7 @@ app.put("/api/vehiculos/:id", ar(async (q, s) => {
   return s.json(x.rows[0]);
 }));
 
+
 app.use((e, _q, s, _n) => {
   console.error(e);
   if (e.code === "23505") {

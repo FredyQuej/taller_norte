@@ -46,6 +46,34 @@ CREATE TABLE IF NOT EXISTS vehiculos (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_vehiculos_placa_upper ON vehiculos (UPPER(placa));
 CREATE INDEX IF NOT EXISTS idx_vehiculos_propietario ON vehiculos(propietario_id);
 
+CREATE TABLE IF NOT EXISTS servicios (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  nombre VARCHAR(120) NOT NULL,
+  descripcion TEXT,
+  precio NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (precio >= 0),
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ordenes_servicio (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  vehiculo_id BIGINT NOT NULL REFERENCES vehiculos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  servicio_id BIGINT NOT NULL REFERENCES servicios(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  fecha_ingreso DATE NOT NULL DEFAULT CURRENT_DATE,
+  descripcion TEXT NOT NULL,
+  estado VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE' CHECK (estado IN ('PENDIENTE','EN_PROCESO','COMPLETADO','CANCELADO')),
+  prioridad VARCHAR(20) NOT NULL DEFAULT 'MEDIA' CHECK (prioridad IN ('BAJA','MEDIA','ALTA')),
+  kilometraje INTEGER NOT NULL DEFAULT 0 CHECK (kilometraje >= 0),
+  costo NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (costo >= 0),
+  observaciones TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ordenes_servicio_vehiculo ON ordenes_servicio(vehiculo_id);
+CREATE INDEX IF NOT EXISTS idx_ordenes_servicio_servicio ON ordenes_servicio(servicio_id);
+
 INSERT INTO roles(nombre) VALUES ('ADMIN'), ('RECEPCIONISTA') ON CONFLICT DO NOTHING;
 INSERT INTO usuarios(rol_id,nombre,correo,password_hash)
 SELECT r.id,'Administrador','admin@local.test',crypt('Admin123*',gen_salt('bf'))

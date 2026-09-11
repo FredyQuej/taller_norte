@@ -50,6 +50,28 @@ services:
       postgres:
         condition: service_healthy
 
+  service-service:
+    build: ./services/service-service
+    environment:
+      PORT: 3003
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mantenimiento}:${POSTGRES_PASSWORD:-mantenimiento123}@postgres:5432/${POSTGRES_DB:-control_mantenimiento}
+      JWT_SECRET: ${JWT_SECRET:-clave_desarrollo_no_usar_en_produccion}
+    ports: ["3003:3003"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-service:
+    build: ./services/order-service
+    environment:
+      PORT: 3004
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mantenimiento}:${POSTGRES_PASSWORD:-mantenimiento123}@postgres:5432/${POSTGRES_DB:-control_mantenimiento}
+      JWT_SECRET: ${JWT_SECRET:-clave_desarrollo_no_usar_en_produccion}
+    ports: ["3004:3004"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     ports: ["${FRONTEND_PORT:-3000}:80"]
@@ -57,6 +79,10 @@ services:
       auth-service:
         condition: service_started
       vehicle-service:
+        condition: service_started
+      service-service:
+        condition: service_started
+      order-service:
         condition: service_started
 
 volumes:
