@@ -37,6 +37,10 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+const requireRole = (...roles) => (req, res, next) => roles.includes(req.user?.rol) || req.user?.rol === 'ADMIN'
+  ? next()
+  : res.status(403).json({ error: 'No tiene permisos para esta operación' });
+
 const parseOrderPayload = (body) => ({
   vehiculo_id: body.vehiculo_id !== undefined && body.vehiculo_id !== null ? Number(body.vehiculo_id) : null,
   servicio_id: body.servicio_id !== undefined && body.servicio_id !== null ? Number(body.servicio_id) : null,
@@ -56,6 +60,25 @@ const orderSelect = `
   JOIN propietarios p ON p.id = v.propietario_id
   JOIN servicios svc ON svc.id = os.servicio_id
 `;
+
+app.get('/api/vehiculos/:vehiculoId/historial', authenticateToken, async (req, res) => {
+  const { vehiculoId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `${orderSelect}
+       WHERE os.vehiculo_id = $1
+         AND ($2::bigint IS NULL OR v.propietario_id = $2)
+       ORDER BY os.fecha_ingreso DESC, os.id DESC`,
+      [vehiculoId, req.user.rol === 'CLIENTE' ? req.user.propietario_id : null]
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching vehicle history:', error);
+    res.status(500).json({ error: 'Error al consultar el historial del vehículo' });
+  }
+});
 
 app.get('/', (_req, res) => {
   res.json({
@@ -79,8 +102,9 @@ app.get('/api/ordenes-servicio', authenticateToken, async (req, res) => {
     const result = await pool.query(
       `${orderSelect}
        WHERE ($1::text IS NULL OR os.descripcion ILIKE '%' || $1 || '%' OR v.placa ILIKE '%' || $1 || '%' OR svc.nombre ILIKE '%' || $1 || '%' OR p.nombre ILIKE '%' || $1 || '%')
+         AND ($2::bigint IS NULL OR v.propietario_id = $2)
        ORDER BY os.id DESC`,
-      [searchTerm]
+      [searchTerm, req.user.rol === 'CLIENTE' ? req.user.propietario_id : null]
     );
     res.json(result.rows);
   } catch (error) {
@@ -94,8 +118,9 @@ app.get('/api/ordenes-servicio/:id', authenticateToken, async (req, res) => {
 
   try {
     const result = await pool.query(
-      `${orderSelect} WHERE os.id = $1`,
-      [id]
+      `${orderSelect} WHERE os.id = $1
+       AND ($2::bigint IS NULL OR v.propietario_id = $2)`,
+      [id, req.user.rol === 'CLIENTE' ? req.user.propietario_id : null]
     );
 
     if (result.rowCount === 0) {
@@ -109,7 +134,7 @@ app.get('/api/ordenes-servicio/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/ordenes-servicio', authenticateToken, async (req, res) => {
+app.post('/api/ordenes-servicio', authenticateToken, requireRole('RECEPCIONISTA', 'ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
   const payload = parseOrderPayload(req.body);
 
   if (!payload.vehiculo_id || !payload.servicio_id || !payload.descripcion || !payload.fecha_ingreso) {
@@ -146,7 +171,7 @@ app.post('/api/ordenes-servicio', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/ordenes-servicio/:id', authenticateToken, async (req, res) => {
+app.put('/api/ordenes-servicio/:id', authenticateToken, requireRole('ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
   const { id } = req.params;
   const payload = parseOrderPayload(req.body);
 

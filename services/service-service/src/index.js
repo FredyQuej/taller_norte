@@ -37,6 +37,10 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+const requireRole = (...roles) => (req, res, next) => roles.includes(req.user?.rol) || req.user?.rol === 'ADMIN'
+  ? next()
+  : res.status(403).json({ error: 'No tiene permisos para esta operación' });
+
 const parseServicePayload = (body) => ({
   nombre: body.nombre,
   descripcion: body.descripcion || '',
@@ -89,7 +93,7 @@ app.get('/api/servicios/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/servicios', authenticateToken, async (req, res) => {
+app.post('/api/servicios', authenticateToken, requireRole('ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
   const payload = parseServicePayload(req.body);
 
   try {
@@ -107,7 +111,7 @@ app.post('/api/servicios', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/servicios/:id', authenticateToken, async (req, res) => {
+app.put('/api/servicios/:id', authenticateToken, requireRole('ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
   const { id } = req.params;
   const payload = parseServicePayload(req.body);
 

@@ -2,7 +2,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS roles (
   id SMALLINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  nombre VARCHAR(30) NOT NULL UNIQUE CHECK (nombre IN ('ADMIN','RECEPCIONISTA'))
+  nombre VARCHAR(30) NOT NULL UNIQUE CHECK (nombre IN ('RECEPCIONISTA','ENCARGADO','SUPER_USUARIO','CLIENTE'))
 );
 
 CREATE TABLE IF NOT EXISTS usuarios (
@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS propietarios (
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT propietario_contacto_chk CHECK (telefono IS NOT NULL OR correo IS NOT NULL)
 );
+
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS propietario_id BIGINT REFERENCES propietarios(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS vehiculos (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -74,8 +76,8 @@ CREATE TABLE IF NOT EXISTS ordenes_servicio (
 CREATE INDEX IF NOT EXISTS idx_ordenes_servicio_vehiculo ON ordenes_servicio(vehiculo_id);
 CREATE INDEX IF NOT EXISTS idx_ordenes_servicio_servicio ON ordenes_servicio(servicio_id);
 
-INSERT INTO roles(nombre) VALUES ('ADMIN'), ('RECEPCIONISTA') ON CONFLICT DO NOTHING;
+INSERT INTO roles(nombre) VALUES ('RECEPCIONISTA'), ('ENCARGADO'), ('SUPER_USUARIO'), ('CLIENTE') ON CONFLICT DO NOTHING;
 INSERT INTO usuarios(rol_id,nombre,correo,password_hash)
 SELECT r.id,'Administrador','admin@local.test',crypt('Admin123*',gen_salt('bf'))
-FROM roles r WHERE r.nombre='ADMIN'
+FROM roles r WHERE r.nombre='SUPER_USUARIO'
 ON CONFLICT (correo) DO NOTHING;

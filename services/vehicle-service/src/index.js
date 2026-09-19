@@ -42,6 +42,12 @@ function auth(q, s, n) {
   }
 }
 
+function requireRole(...roles) {
+  return (q, s, n) => roles.includes(q.user?.rol) || q.user?.rol === "ADMIN"
+    ? n()
+    : s.status(403).json({ error: "No tiene permisos para esta operación" });
+}
+
 app.get("/health", ar(async (_q, s) => {
   await pool.query("SELECT 1");
   s.json({ service: "vehicle-service", status: "ok" });
@@ -60,7 +66,7 @@ app.get("/api/propietarios", ar(async (q, s) => {
   s.json(x.rows);
 }));
 
-app.post("/api/propietarios", ar(async (q, s) => {
+app.post("/api/propietarios", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
   const { tipo, nombre, telefono = null, correo = null, direccion = null } = q.body;
 
   if (!['INDIVIDUAL', 'EMPRESA'].includes(tipo) || !nombre || (!telefono && !correo)) {
@@ -85,7 +91,7 @@ app.get("/api/propietarios/:id", ar(async (q, s) => {
   return s.json(x.rows[0]);
 }));
 
-app.put("/api/propietarios/:id", ar(async (q, s) => {
+app.put("/api/propietarios/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
   const { tipo, nombre, telefono = null, correo = null, direccion = null, activo = true } = q.body;
 
   if (!['INDIVIDUAL', 'EMPRESA'].includes(tipo) || !nombre || (!telefono && !correo)) {
@@ -114,18 +120,20 @@ app.put("/api/propietarios/:id", ar(async (q, s) => {
 }));
 
 app.get("/api/vehiculos", ar(async (q, s) => {
+  if (q.user?.rol === "CLIENTE" && !q.user.propietario_id) return s.json([]);
   const x = await pool.query(
     `SELECT v.*, p.nombre propietario
      FROM vehiculos v
      JOIN propietarios p ON p.id = v.propietario_id
      WHERE ($1::text IS NULL OR v.placa ILIKE '%' || $1 || '%' OR p.nombre ILIKE '%' || $1 || '%')
+       AND ($2::bigint IS NULL OR v.propietario_id = $2)
      ORDER BY v.id DESC`,
-    [q.query.buscar || null],
+    [q.query.buscar || null, q.user?.rol === "CLIENTE" ? q.user.propietario_id : null],
   );
   s.json(x.rows);
 }));
 
-app.post("/api/vehiculos", ar(async (q, s) => {
+app.post("/api/vehiculos", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
   const {
     propietario_id,
     tipo,
@@ -157,8 +165,9 @@ app.get("/api/vehiculos/:id", ar(async (q, s) => {
     `SELECT v.*, p.nombre propietario
      FROM vehiculos v
      JOIN propietarios p ON p.id = v.propietario_id
-     WHERE v.id = $1`,
-    [q.params.id],
+     WHERE v.id = $1
+       AND ($2::bigint IS NULL OR v.propietario_id = $2)`,
+    [q.params.id, q.user?.rol === "CLIENTE" ? q.user.propietario_id : null],
   );
   if (!x.rowCount) {
     return s.status(404).json({ error: "Vehículo no encontrado" });
@@ -166,7 +175,7 @@ app.get("/api/vehiculos/:id", ar(async (q, s) => {
   return s.json(x.rows[0]);
 }));
 
-app.put("/api/vehiculos/:id", ar(async (q, s) => {
+app.put("/api/vehiculos/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
   const current = await pool.query("SELECT * FROM vehiculos WHERE id = $1", [q.params.id]);
   if (!current.rowCount) {
     return s.status(404).json({ error: "Vehículo no encontrado" });

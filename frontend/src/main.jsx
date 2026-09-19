@@ -12,15 +12,22 @@ import {
   ShieldCheck,
   UserRound,
   UsersRound,
+  UserPlus,
   Wrench,
   X,
 } from "lucide-react";
+import { authService } from "./application/services/authService";
+import { ownerService } from "./application/services/ownerService";
+import { orderService } from "./application/services/orderService";
+import { serviceService } from "./application/services/serviceService";
+import { vehicleService } from "./application/services/vehicleService";
+import { clearSession, getSession, saveSession } from "./infrastructure/storage/sessionStorage";
+import { OwnerForm as OwnerFormView, OwnerList } from "./presentation/components/owners/OwnerComponents";
+import { OrderDetail, OrderForm, OrderList } from "./presentation/components/orders/OrderComponents";
+import { ServiceCatalog, ServiceForm as ServiceFormView } from "./presentation/components/services/ServiceComponents";
+import { VehicleForm as VehicleFormView, VehicleHistory, VehicleList } from "./presentation/components/vehicles/VehicleComponents";
+import { UserForm, UserList } from "./presentation/components/users/UserComponents";
 import "./styles.css";
-
-const AUTH_API = import.meta.env.VITE_AUTH_API || "http://localhost:3001";
-const VEHICLE_API = import.meta.env.VITE_VEHICLE_API || "http://localhost:3002";
-const SERVICE_API = import.meta.env.VITE_SERVICE_API || "http://localhost:3003";
-const ORDER_API = import.meta.env.VITE_ORDER_API || "http://localhost:3004";
 
 function formatCurrentDate() {
   return new Intl.DateTimeFormat("es-ES", {
@@ -31,18 +38,10 @@ function formatCurrentDate() {
   }).format(new Date());
 }
 
-async function request(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "No se pudo completar la solicitud");
-  return data;
-}
-
 function Login({ onLogin }) {
+  const [registering, setRegistering] = useState(false);
   const [form, setForm] = useState({ correo: "admin@local.test", password: "Admin123*" });
+  const [registration, setRegistration] = useState({ nombre: "", correo: "", password: "", numero_orden: "", servicio: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -51,11 +50,15 @@ function Login({ onLogin }) {
     setError("");
     setLoading(true);
     try {
-      const data = await request(`${AUTH_API}/api/auth/login`, {
-        method: "POST",
-        body: JSON.stringify(form),
-      });
-      onLogin(data);
+      if (registering) {
+        await authService.registerPublic(registration);
+        setForm({ correo: registration.correo, password: registration.password });
+        setRegistration({ nombre: "", correo: "", password: "", numero_orden: "", servicio: "" });
+        setRegistering(false);
+      } else {
+        const data = await authService.login(form);
+        onLogin(data);
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -77,16 +80,18 @@ function Login({ onLogin }) {
       <section className="login-panel">
         <div className="login-form-wrap">
           <div className="mobile-brand brand"><Wrench size={19} /> TALLER NORTE</div>
-          <span className="eyebrow">BIENVENIDO DE VUELTA</span>
-          <h2>Entra a tu espacio<br />de trabajo.</h2>
-          <p className="muted">Usa tus credenciales para continuar.</p>
+          <span className="eyebrow">{registering ? "NUEVA CUENTA" : "BIENVENIDO DE VUELTA"}</span>
+          <h2>{registering ? <>Crea tu cuenta<br />de trabajo.</> : <>Entra a tu espacio<br />de trabajo.</>}</h2>
+          <p className="muted">{registering ? "Tu cuenta se creará como Cliente para consultar tu servicio." : "Usa tus credenciales para continuar."}</p>
           <form onSubmit={submit} className="stack-form">
-            <label>Correo electrónico<input type="email" value={form.correo} onChange={(e) => setForm({ ...form, correo: e.target.value })} required /></label>
-            <label>Contraseña<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></label>
+            {registering && <label>Nombre completo<input value={registration.nombre} onChange={(e) => setRegistration({ ...registration, nombre: e.target.value })} required /></label>}
+            <label>Correo electrónico<input type="email" value={registering ? registration.correo : form.correo} onChange={(e) => registering ? setRegistration({ ...registration, correo: e.target.value }) : setForm({ ...form, correo: e.target.value })} required /></label>
+            <label>Contraseña<input type="password" minLength="8" value={registering ? registration.password : form.password} onChange={(e) => registering ? setRegistration({ ...registration, password: e.target.value }) : setForm({ ...form, password: e.target.value })} required /></label>
+            {registering && <><label>Número de orden<input placeholder="Ej. OS-0006" value={registration.numero_orden} onChange={(e) => setRegistration({ ...registration, numero_orden: e.target.value })} required /></label><label>Servicio realizado<input placeholder="Ej. Diagnóstico Computarizado" value={registration.servicio} onChange={(e) => setRegistration({ ...registration, servicio: e.target.value })} required /></label></>}
             {error && <div className="alert error">{error}</div>}
-            <button className="button primary full" disabled={loading}>{loading ? "Ingresando..." : "Ingresar al panel"}<ChevronRight size={18} /></button>
+            <button className="button primary full" disabled={loading}>{loading ? (registering ? "Registrando..." : "Ingresando...") : (registering ? "Crear cuenta" : "Ingresar al panel")}<ChevronRight size={18} /></button>
           </form>
-          <p className="login-hint">Acceso inicial: <strong>admin@local.test</strong></p>
+          <p className="login-hint">{registering ? <>¿Ya tienes cuenta? <button type="button" className="link-button" onClick={() => { setRegistering(false); setError(""); }}>Iniciar sesión</button></> : <>¿No tienes cuenta? <button type="button" className="link-button" onClick={() => { setRegistering(true); setError(""); }}>Registrarte</button></>}</p>
         </div>
       </section>
     </main>
@@ -103,7 +108,7 @@ function OwnerForm({ token, onDone, onCancel }) {
   async function submit(event) {
     event.preventDefault();
     try {
-      await request(`${VEHICLE_API}/api/propietarios`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify(form) });
+      await ownerService.create(token, form);
       onDone();
     } catch (requestError) { setError(requestError.message); }
   }
@@ -116,7 +121,7 @@ function VehicleForm({ token, owners, onDone, onCancel }) {
   async function submit(event) {
     event.preventDefault();
     try {
-      await request(`${VEHICLE_API}/api/vehiculos`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...form, propietario_id: Number(form.propietario_id), anio: Number(form.anio), kilometraje_actual: Number(form.kilometraje_actual) }) });
+      await vehicleService.createVehicle(token, { ...form, propietario_id: Number(form.propietario_id), anio: Number(form.anio), kilometraje_actual: Number(form.kilometraje_actual) });
       onDone();
     } catch (requestError) { setError(requestError.message); }
   }
@@ -148,13 +153,7 @@ function ServiceForm({ token, initialData, onDone, onCancel }) {
         ...form,
         precio: Number(form.precio),
       };
-      const url = initialData?.id ? `${SERVICE_API}/api/servicios/${initialData.id}` : `${SERVICE_API}/api/servicios`;
-      const method = initialData?.id ? "PUT" : "POST";
-      await request(url, {
-        method,
-        headers: { Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
+      await serviceService.save(token, payload, initialData?.id);
       onDone();
     } catch (requestError) { setError(requestError.message); }
   }
@@ -211,13 +210,7 @@ function ServiceOrderForm({ token, vehicles, services, initialData, onDone, onCa
         kilometraje: Number(form.kilometraje),
         costo: Number(form.costo),
       };
-      const url = initialData?.id ? `${ORDER_API}/api/ordenes-servicio/${initialData.id}` : `${ORDER_API}/api/ordenes-servicio`;
-      const method = initialData?.id ? "PUT" : "POST";
-      await request(url, {
-        method,
-        headers: { Authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload),
-      });
+      await orderService.save(token, payload, initialData?.id);
       onDone();
     } catch (requestError) { setError(requestError.message); }
   }
@@ -430,32 +423,38 @@ function OrderDetailSection({ order, onBack, onEdit }) {
 }
 
 function App({ session, onLogout }) {
-  const [active, setActive] = useState("overview");
+  const isClient = session.usuario.rol === "CLIENTE";
+  const [active, setActive] = useState(isClient ? "orders" : "overview");
   const [owners, setOwners] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [services, setServices] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [users, setUsers] = useState([]);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState("");
   const [modalData, setModalData] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [vehicleHistory, setVehicleHistory] = useState([]);
   const [orderFilters, setOrderFilters] = useState({ estado: "TODOS", vehiculo: "TODOS" });
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
 
   async function loadData() {
     try {
-      const headers = { Authorization: `Bearer ${session.token}` };
       const [ownerData, vehicleData, serviceData, orderData] = await Promise.all([
-        request(`${VEHICLE_API}/api/propietarios`, { headers }),
-        request(`${VEHICLE_API}/api/vehiculos`, { headers }),
-        request(`${SERVICE_API}/api/servicios`, { headers }),
-        request(`${ORDER_API}/api/ordenes-servicio`, { headers }),
+        isClient ? Promise.resolve([]) : ownerService.list(session.token),
+        vehicleService.listVehicles(session.token),
+        isClient ? Promise.resolve([]) : serviceService.list(session.token),
+        orderService.list(session.token),
       ]);
       setOwners(ownerData);
       setVehicles(vehicleData);
       setServices(serviceData);
       setOrders(orderData);
+      if (session.usuario.rol === "SUPER_USUARIO" || session.usuario.rol === "ADMIN") {
+        setUsers(await authService.listUsers(session.token));
+      }
       setError("");
     } catch (requestError) { setError(requestError.message); }
   }
@@ -463,8 +462,10 @@ function App({ session, onLogout }) {
 
   const filteredOwners = owners.filter((owner) => `${owner.nombre} ${owner.correo || ""} ${owner.telefono || ""}`.toLowerCase().includes(search.toLowerCase()));
   const filteredVehicles = vehicles.filter((vehicle) => `${vehicle.placa} ${vehicle.marca} ${vehicle.modelo} ${vehicle.propietario || ""}`.toLowerCase().includes(search.toLowerCase()));
-  const nav = [{ id: "overview", label: "Resumen", icon: Wrench }, { id: "owners", label: "Propietarios", icon: UsersRound }, { id: "vehicles", label: "Vehículos", icon: CarFront }, { id: "services", label: "Servicios", icon: Wrench }, { id: "orders", label: "Órdenes", icon: ShieldCheck }];
-  const title = active === "overview" ? "Resumen operativo" : active === "owners" ? "Propietarios" : active === "vehicles" ? "Vehículos" : active === "services" ? "Servicios" : active === "order-detail" ? "Detalle de orden" : "Órdenes";
+  const isSuperUser = session.usuario.rol === "SUPER_USUARIO" || session.usuario.rol === "ADMIN";
+  const canManageCatalog = isSuperUser || session.usuario.rol === "ENCARGADO";
+  const nav = isClient ? [{ id: "orders", label: "Mis servicios", icon: ShieldCheck }] : [{ id: "overview", label: "Resumen", icon: Wrench }, { id: "owners", label: "Propietarios", icon: UsersRound }, { id: "vehicles", label: "Vehículos", icon: CarFront }, ...(canManageCatalog ? [{ id: "services", label: "Servicios", icon: Wrench }] : []), { id: "orders", label: "Órdenes", icon: ShieldCheck }, ...(isSuperUser ? [{ id: "users", label: "Usuarios", icon: UserPlus }] : [])];
+  const title = active === "overview" ? "Resumen operativo" : active === "owners" ? "Propietarios" : active === "vehicles" ? "Vehículos" : active === "services" ? "Servicios" : active === "users" ? "Usuarios" : active === "orders" && isClient ? "Mis servicios" : active === "order-detail" ? "Detalle de orden" : active === "vehicle-history" ? "Historial del vehículo" : "Órdenes";
 
   function changeSection(id) {
     setActive(id);
@@ -472,6 +473,23 @@ function App({ session, onLogout }) {
     setMenuOpen(false);
     if (id !== "order-detail") {
       setSelectedOrder(null);
+    }
+    if (id !== "vehicle-history") {
+      setSelectedVehicle(null);
+      setVehicleHistory([]);
+    }
+  }
+
+  async function openVehicleHistory(vehicle) {
+    setSelectedVehicle(vehicle);
+    setVehicleHistory([]);
+    setActive("vehicle-history");
+
+    try {
+      const history = await orderService.getVehicleHistory(session.token, vehicle.id);
+      setVehicleHistory(history);
+    } catch (requestError) {
+      setError(requestError.message);
     }
   }
 
@@ -491,7 +509,7 @@ function App({ session, onLogout }) {
     loadData();
   }
 
-  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="brand"><Wrench size={19} /> TALLER NORTE</div><div className="side-label">OPERACIÓN</div><nav>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "active" : ""} onClick={() => changeSection(id)}><Icon size={18} />{label}{active === id && <ChevronRight size={15} className="nav-arrow" />}</button>)}</nav><div className="sidebar-bottom"><div className="user-card"><div className="avatar"><CircleUserRound size={20} /></div><div><strong>{session.usuario.nombre}</strong><span>{session.usuario.rol}</span></div></div><button className="logout" onClick={onLogout}><LogOut size={16} /> Cerrar sesión</button></div></aside><main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div><span className="eyebrow">{formatCurrentDate()}</span><h1>{title}</h1></div><div className="topbar-user"><span>Sesión activa</span><div className="avatar small"><UserRound size={17} /></div></div></header>{error && <div className="alert error page-alert">{error}</div>}{active === "overview" && <Overview owners={owners} vehicles={vehicles} onSection={changeSection} />} {active === "owners" && <ResourceSection type="owners" items={filteredOwners} search={search} setSearch={setSearch} onAdd={() => setModal("owner")} />} {active === "vehicles" && <ResourceSection type="vehicles" items={filteredVehicles} search={search} setSearch={setSearch} onAdd={() => setModal("vehicle")} />} {active === "services" && <ServicesSection services={services} onAddService={() => openServiceModal()} onEditService={openServiceModal} />} {active === "orders" && <OrdersSection orders={orders} vehicles={vehicles} services={services} filters={orderFilters} onFiltersChange={setOrderFilters} onAddOrder={() => openOrderModal()} onDetailOrder={(order) => { setSelectedOrder(order); setActive("order-detail"); }} onEditOrder={openOrderModal} />} {active === "order-detail" && selectedOrder && <OrderDetailSection order={selectedOrder} onBack={() => changeSection("orders")} onEdit={openOrderModal} />}</main>{modal === "owner" && <Modal title="Registrar propietario" onClose={() => setModal("")}><OwnerForm token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "vehicle" && <Modal title="Registrar vehículo" onClose={() => setModal("")}><VehicleForm token={session.token} owners={owners} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "service" && <Modal title={modalData?.id ? "Editar servicio" : "Registrar servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceForm token={session.token} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "order" && <Modal title={modalData?.id ? "Editar orden de servicio" : "Registrar orden de servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceOrderForm token={session.token} vehicles={vehicles} services={services} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}</div>;
+  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="brand"><Wrench size={19} /> TALLER NORTE</div><div className="side-label">OPERACIÓN</div><nav>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "active" : ""} onClick={() => changeSection(id)}><Icon size={18} />{label}{active === id && <ChevronRight size={15} className="nav-arrow" />}</button>)}</nav><div className="sidebar-bottom"><div className="user-card"><div className="avatar"><CircleUserRound size={20} /></div><div><strong>{session.usuario.nombre}</strong><span>{session.usuario.rol}</span></div></div><button className="logout" onClick={onLogout}><LogOut size={16} /> Cerrar sesión</button></div></aside><main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div><span className="eyebrow">{formatCurrentDate()}</span><h1>{title}</h1></div><div className="topbar-user"><span>Sesión activa</span><div className="avatar small"><UserRound size={17} /></div></div></header>{error && <div className="alert error page-alert">{error}</div>}{active === "overview" && <Overview owners={owners} vehicles={vehicles} onSection={changeSection} />} {active === "owners" && <OwnerList items={filteredOwners} search={search} setSearch={setSearch} onAdd={() => setModal("owner")} />} {active === "vehicles" && <VehicleList items={filteredVehicles} search={search} setSearch={setSearch} onAdd={() => setModal("vehicle")} onViewHistory={openVehicleHistory} />} {active === "vehicle-history" && selectedVehicle && <VehicleHistory vehicle={selectedVehicle} history={vehicleHistory} onBack={() => changeSection("vehicles")} />} {active === "services" && canManageCatalog && <ServiceCatalog services={services} onAdd={() => openServiceModal()} onEdit={openServiceModal} />} {active === "orders" && <OrderList orders={orders} vehicles={vehicles} services={services} filters={orderFilters} onFiltersChange={setOrderFilters} onAdd={() => openOrderModal()} onDetail={(order) => { setSelectedOrder(order); setActive("order-detail"); }} onEdit={openOrderModal} />} {active === "users" && isSuperUser && <UserList users={users} onAdd={() => setModal("user")} />} {active === "order-detail" && selectedOrder && <OrderDetail order={selectedOrder} onBack={() => changeSection("orders")} onEdit={openOrderModal} />}</main>{modal === "owner" && <Modal title="Registrar propietario" onClose={() => setModal("")}><OwnerFormView token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "vehicle" && <Modal title="Registrar vehículo" onClose={() => setModal("")}><VehicleFormView token={session.token} owners={owners} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "service" && <Modal title={modalData?.id ? "Editar servicio" : "Registrar servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceFormView token={session.token} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "order" && <Modal title={modalData?.id ? "Editar orden de servicio" : "Registrar orden de servicio"} onClose={() => { setModal(""); setModalData(null); }}><OrderForm token={session.token} vehicles={vehicles} services={services} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "user" && isSuperUser && <Modal title="Registrar usuario" onClose={() => setModal("")}><UserForm token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}</div>;
 }
 
 function Overview({ owners, vehicles, onSection }) {
@@ -499,8 +517,55 @@ function Overview({ owners, vehicles, onSection }) {
 }
 function Stat({ icon: Icon, label, value, accent }) { return <div className={`stat ${accent ? "accent" : ""}`}><div className="stat-icon"><Icon size={20} /></div><div><span>{label}</span><strong>{value}</strong></div></div>; }
 function QuickCard({ icon: Icon, title, detail, count, onClick }) { return <button className="quick-card" onClick={onClick}><div className="quick-icon"><Icon size={21} /></div><div className="quick-copy"><h3>{title}</h3><p>{detail}</p><span>{count}</span></div><ChevronRight className="quick-arrow" size={19} /></button>; }
-function ResourceSection({ type, items, search, setSearch, onAdd }) { const isOwners = type === "owners"; return <section className="content"><div className="section-toolbar"><div><p className="muted">{isOwners ? "Directorio de clientes" : "Inventario de unidades"}</p><h2>{isOwners ? "Todos los propietarios" : "Todos los vehículos"}</h2></div><button className="button primary" onClick={onAdd}><Plus size={17} /> {isOwners ? "Nuevo propietario" : "Nuevo vehículo"}</button></div><div className="list-toolbar"><div className="search-box"><Search size={17} /><input placeholder={isOwners ? "Buscar por nombre, correo..." : "Buscar por placa, marca, propietario..."} value={search} onChange={(e) => setSearch(e.target.value)} /></div><span className="result-count">{items.length} registros</span></div>{items.length === 0 ? <div className="empty"><div className="empty-icon">{isOwners ? <UsersRound size={26} /> : <CarFront size={26} />}</div><h3>No hay registros todavía</h3><p>Empieza agregando {isOwners ? "un propietario" : "un vehículo"} al sistema.</p><button className="button secondary" onClick={onAdd}><Plus size={16} /> Crear registro</button></div> : <div className="table-wrap"><table><thead><tr>{isOwners ? <><th>Nombre</th><th>Tipo</th><th>Contacto</th><th>Estado</th></> : <><th>Vehículo</th><th>Propietario</th><th>Placa</th><th>Kilometraje</th><th>Estado</th></>}</tr></thead><tbody>{items.map((item) => isOwners ? <tr key={item.id}><td><strong>{item.nombre}</strong><small>ID #{item.id}</small></td><td><span className="tag">{item.tipo}</span></td><td>{item.telefono || item.correo || "Sin contacto"}</td><td><span className="status"><i /> Activo</span></td></tr> : <tr key={item.id}><td><strong>{item.marca} {item.modelo}</strong><small>{item.tipo} · {item.anio}</small></td><td>{item.propietario}</td><td><span className="plate">{item.placa}</span></td><td>{Number(item.kilometraje_actual).toLocaleString("es-GT")} km</td><td><span className="status"><i /> {item.estado}</span></td></tr>)}</tbody></table></div>}</section>; }
+function VehicleHistorySection({ vehicle, history, onBack }) {
+  return (
+    <section className="content">
+      <div className="section-toolbar">
+        <div>
+          <p className="muted">Historial del vehículo</p>
+          <h2>{vehicle.marca} {vehicle.modelo} · {vehicle.placa}</h2>
+        </div>
+        <button className="button ghost" onClick={onBack}>Volver</button>
+      </div>
 
-function Root() { const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem("taller_session")); } catch { return null; } }); function login(data) { localStorage.setItem("taller_session", JSON.stringify(data)); setSession(data); } function logout() { localStorage.removeItem("taller_session"); setSession(null); } return session ? <App session={session} onLogout={logout} /> : <Login onLogin={login} />; }
+      <div className="stat-grid">
+        <Stat icon={CarFront} label="Propietario" value={vehicle.propietario || "Sin propietario"} accent />
+        <Stat icon={Wrench} label="Kilometraje" value={`${Number(vehicle.kilometraje_actual || 0).toLocaleString("es-GT")} km`} />
+        <Stat icon={ShieldCheck} label="Estado" value={vehicle.estado} />
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Orden</th>
+              <th>Servicio</th>
+              <th>Fecha</th>
+              <th>Estado</th>
+              <th>Costo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.length === 0 ? (
+              <tr><td colSpan="5"><div className="empty"><h3>Sin historial</h3><p>Este vehículo aún no tiene mantenimientos registrados.</p></div></td></tr>
+            ) : history.map((item) => (
+              <tr key={item.id}>
+                <td><strong>OS-{String(item.id).padStart(4, "0")}</strong><small>{item.descripcion}</small></td>
+                <td>{item.servicio}</td>
+                <td>{item.fecha_ingreso}</td>
+                <td><span className="status"><i /> {item.estado}</span></td>
+                <td>Q {Number(item.costo || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ResourceSection({ type, items, search, setSearch, onAdd, onViewHistory }) { const isOwners = type === "owners"; return <section className="content"><div className="section-toolbar"><div><p className="muted">{isOwners ? "Directorio de clientes" : "Inventario de unidades"}</p><h2>{isOwners ? "Todos los propietarios" : "Todos los vehículos"}</h2></div><button className="button primary" onClick={onAdd}><Plus size={17} /> {isOwners ? "Nuevo propietario" : "Nuevo vehículo"}</button></div><div className="list-toolbar"><div className="search-box"><Search size={17} /><input placeholder={isOwners ? "Buscar por nombre, correo..." : "Buscar por placa, marca, propietario..."} value={search} onChange={(e) => setSearch(e.target.value)} /></div><span className="result-count">{items.length} registros</span></div>{items.length === 0 ? <div className="empty"><div className="empty-icon">{isOwners ? <UsersRound size={26} /> : <CarFront size={26} />}</div><h3>No hay registros todavía</h3><p>Empieza agregando {isOwners ? "un propietario" : "un vehículo"} al sistema.</p><button className="button secondary" onClick={onAdd}><Plus size={16} /> Crear registro</button></div> : <div className="table-wrap"><table><thead><tr>{isOwners ? <><th>Nombre</th><th>Tipo</th><th>Contacto</th><th>Estado</th></> : <><th>Vehículo</th><th>Propietario</th><th>Placa</th><th>Kilometraje</th><th>Estado</th><th>Acciones</th></>}</tr></thead><tbody>{items.map((item) => isOwners ? <tr key={item.id}><td><strong>{item.nombre}</strong><small>ID #{item.id}</small></td><td><span className="tag">{item.tipo}</span></td><td>{item.telefono || item.correo || "Sin contacto"}</td><td><span className="status"><i /> Activo</span></td></tr> : <tr key={item.id}><td><strong>{item.marca} {item.modelo}</strong><small>{item.tipo} · {item.anio}</small></td><td>{item.propietario}</td><td><span className="plate">{item.placa}</span></td><td>{Number(item.kilometraje_actual).toLocaleString("es-GT")} km</td><td><span className="status"><i /> {item.estado}</span></td><td><button className="button secondary" onClick={() => onViewHistory(item)}>Historial</button></td></tr>)}</tbody></table></div>}</section>; }
+
+function Root() { const [session, setSession] = useState(getSession); function login(data) { saveSession(data); setSession(data); } function logout() { clearSession(); setSession(null); } return session ? <App session={session} onLogout={logout} /> : <Login onLogin={login} />; }
 
 createRoot(document.getElementById("root")).render(<Root />);

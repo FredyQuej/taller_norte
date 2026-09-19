@@ -39,6 +39,7 @@ input:focus, select:focus { border-color: #829c4d; box-shadow: 0 0 0 3px rgba(18
 .alert.error { background: #fff0ed; color: #ae4d3b; border: 1px solid #f3c5bb; }
 .login-hint { margin-top: 25px; color: var(--muted); font-size: 11px; }
 .login-hint strong { color: var(--ink); }
+.link-button { border: 0; padding: 0; background: transparent; color: var(--deep); font-weight: 700; text-decoration: underline; }
 .mobile-brand { display: none; margin-bottom: 60px; }
 .app-shell { min-height: 100vh; display: flex; }
 .sidebar { width: 245px; min-height: 100vh; flex: 0 0 245px; background: var(--deep); color: #bac5b8; padding: 34px 20px 24px; display: flex; flex-direction: column; }
