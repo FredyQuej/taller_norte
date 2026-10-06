@@ -48,6 +48,12 @@ function requireRole(...roles) {
     : s.status(403).json({ error: "No tiene permisos para esta operación" });
 }
 
+function requirePermission(module, action) {
+  return (q, s, n) => ["ADMIN", "SUPER_USUARIO"].includes(q.user?.rol) || q.user?.permisos?.[module]?.[action] === true
+    ? n()
+    : s.status(403).json({ error: "No tiene el permiso requerido" });
+}
+
 app.get("/health", ar(async (_q, s) => {
   await pool.query("SELECT 1");
   s.json({ service: "vehicle-service", status: "ok" });
@@ -66,18 +72,18 @@ app.get("/api/propietarios", ar(async (q, s) => {
   s.json(x.rows);
 }));
 
-app.post("/api/propietarios", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
-  const { tipo, nombre, telefono = null, correo = null, direccion = null } = q.body;
+app.post("/api/propietarios", requirePermission("propietarios", "crear"), ar(async (q, s) => {
+  const { tipo, nombre, nit = null, telefono = null, correo = null, direccion = null } = q.body;
 
   if (!['INDIVIDUAL', 'EMPRESA'].includes(tipo) || !nombre || (!telefono && !correo)) {
     return s.status(400).json({ error: "Tipo, nombre y al menos un contacto son obligatorios" });
   }
 
   const x = await pool.query(
-    `INSERT INTO propietarios(tipo, nombre, telefono, correo, direccion)
-     VALUES($1, $2, $3, $4, $5)
+    `INSERT INTO propietarios(tipo, nombre, nit, telefono, correo, direccion)
+     VALUES($1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [tipo, nombre, telefono, correo, direccion],
+    [tipo, nombre, nit, telefono, correo, direccion],
   );
 
   return s.status(201).json(x.rows[0]);
@@ -91,8 +97,8 @@ app.get("/api/propietarios/:id", ar(async (q, s) => {
   return s.json(x.rows[0]);
 }));
 
-app.put("/api/propietarios/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
-  const { tipo, nombre, telefono = null, correo = null, direccion = null, activo = true } = q.body;
+app.put("/api/propietarios/:id", requirePermission("propietarios", "editar"), ar(async (q, s) => {
+  const { tipo, nombre, nit = null, telefono = null, correo = null, direccion = null, activo = true } = q.body;
 
   if (!['INDIVIDUAL', 'EMPRESA'].includes(tipo) || !nombre || (!telefono && !correo)) {
     return s.status(400).json({ error: "Datos inválidos" });
@@ -102,14 +108,15 @@ app.put("/api/propietarios/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(a
     `UPDATE propietarios
      SET tipo = $1,
          nombre = $2,
-         telefono = $3,
-         correo = $4,
-         direccion = $5,
-         activo = $6,
+         nit = $3,
+         telefono = $4,
+         correo = $5,
+         direccion = $6,
+         activo = $7,
          actualizado_en = NOW()
-     WHERE id = $7
+       WHERE id = $8
      RETURNING *`,
-    [tipo, nombre, telefono, correo, direccion, activo, q.params.id],
+      [tipo, nombre, nit, telefono, correo, direccion, activo, q.params.id],
   );
 
   if (!x.rowCount) {
@@ -117,6 +124,12 @@ app.put("/api/propietarios/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(a
   }
 
   return s.json(x.rows[0]);
+}));
+
+app.delete("/api/propietarios/:id", requirePermission("propietarios", "eliminar"), ar(async (q, s) => {
+  const result = await pool.query("DELETE FROM propietarios WHERE id = $1 RETURNING id", [q.params.id]);
+  if (!result.rowCount) return s.status(404).json({ error: "Propietario no encontrado" });
+  return s.json({ id: result.rows[0].id, eliminado: true });
 }));
 
 app.get("/api/vehiculos", ar(async (q, s) => {
@@ -133,7 +146,7 @@ app.get("/api/vehiculos", ar(async (q, s) => {
   s.json(x.rows);
 }));
 
-app.post("/api/vehiculos", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
+app.post("/api/vehiculos", requirePermission("vehiculos", "crear"), ar(async (q, s) => {
   const {
     propietario_id,
     tipo,
@@ -175,7 +188,7 @@ app.get("/api/vehiculos/:id", ar(async (q, s) => {
   return s.json(x.rows[0]);
 }));
 
-app.put("/api/vehiculos/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(async (q, s) => {
+app.put("/api/vehiculos/:id", requirePermission("vehiculos", "editar"), ar(async (q, s) => {
   const current = await pool.query("SELECT * FROM vehiculos WHERE id = $1", [q.params.id]);
   if (!current.rowCount) {
     return s.status(404).json({ error: "Vehículo no encontrado" });
@@ -217,6 +230,12 @@ app.put("/api/vehiculos/:id", requireRole("ENCARGADO", "SUPER_USUARIO"), ar(asyn
   );
 
   return s.json(x.rows[0]);
+}));
+
+app.delete("/api/vehiculos/:id", requirePermission("vehiculos", "eliminar"), ar(async (q, s) => {
+  const result = await pool.query("DELETE FROM vehiculos WHERE id = $1 RETURNING id", [q.params.id]);
+  if (!result.rowCount) return s.status(404).json({ error: "Vehículo no encontrado" });
+  return s.json({ id: result.rows[0].id, eliminado: true });
 }));
 
 

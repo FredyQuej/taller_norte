@@ -12,4 +12,7 @@ export const serviceService = {
       body: JSON.stringify(data),
     });
   },
+  delete(token, id) {
+    return httpRequest(`${apiConfig.service}/api/servicios/${id}`, { method: "DELETE", headers: bearerHeaders(token) });
+  },
 };

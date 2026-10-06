@@ -41,6 +41,9 @@ const requireRole = (...roles) => (req, res, next) => roles.includes(req.user?.r
   ? next()
   : res.status(403).json({ error: 'No tiene permisos para esta operación' });
 
+const requirePermission = (module, action) => (req, res, next) => ['ADMIN', 'SUPER_USUARIO'].includes(req.user?.rol) || req.user?.permisos?.[module]?.[action] === true
+  ? next() : res.status(403).json({ error: 'No tiene el permiso requerido' });
+
 const parseOrderPayload = (body) => ({
   vehiculo_id: body.vehiculo_id !== undefined && body.vehiculo_id !== null ? Number(body.vehiculo_id) : null,
   servicio_id: body.servicio_id !== undefined && body.servicio_id !== null ? Number(body.servicio_id) : null,
@@ -96,6 +99,25 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'order-service' });
 });
 
+app.get('/api/tickets/:id/status', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT os.id, os.fecha_ingreso, os.estado, os.prioridad, os.descripcion, os.costo,
+              v.placa, v.marca, v.modelo, svc.nombre servicio
+       FROM ordenes_servicio os
+       JOIN vehiculos v ON v.id = os.vehiculo_id
+       JOIN servicios svc ON svc.id = os.servicio_id
+       WHERE os.id = $1`,
+      [req.params.id],
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Ticket no encontrado' });
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching public ticket:', error);
+    res.status(500).json({ error: 'Error al consultar el ticket' });
+  }
+});
+
 app.get('/api/ordenes-servicio', authenticateToken, async (req, res) => {
   try {
     const searchTerm = req.query.buscar || null;
@@ -134,7 +156,7 @@ app.get('/api/ordenes-servicio/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/ordenes-servicio', authenticateToken, requireRole('RECEPCIONISTA', 'ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
+app.post('/api/ordenes-servicio', authenticateToken, requirePermission('ordenes', 'crear'), async (req, res) => {
   const payload = parseOrderPayload(req.body);
 
   if (!payload.vehiculo_id || !payload.servicio_id || !payload.descripcion || !payload.fecha_ingreso) {
@@ -171,7 +193,7 @@ app.post('/api/ordenes-servicio', authenticateToken, requireRole('RECEPCIONISTA'
   }
 });
 
-app.put('/api/ordenes-servicio/:id', authenticateToken, requireRole('ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
+app.put('/api/ordenes-servicio/:id', authenticateToken, requirePermission('ordenes', 'editar'), async (req, res) => {
   const { id } = req.params;
   const payload = parseOrderPayload(req.body);
 
@@ -221,6 +243,17 @@ app.put('/api/ordenes-servicio/:id', authenticateToken, requireRole('ENCARGADO',
   } catch (error) {
     console.error('Error updating orden:', error);
     res.status(500).json({ error: 'Error al actualizar orden de servicio' });
+  }
+});
+
+app.delete('/api/ordenes-servicio/:id', authenticateToken, requirePermission('ordenes', 'eliminar'), async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM ordenes_servicio WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Orden de servicio no encontrada' });
+    return res.json({ id: result.rows[0].id, eliminado: true });
+  } catch (error) {
+    console.error('Error deleting orden:', error);
+    return res.status(500).json({ error: 'Error al eliminar orden de servicio' });
   }
 });
 

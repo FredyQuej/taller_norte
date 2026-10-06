@@ -2,6 +2,9 @@ import { apiConfig } from "../../config/api";
 import { bearerHeaders, httpRequest } from "../../infrastructure/http/httpClient";
 
 export const orderService = {
+  getPublicTicket(id) {
+    return httpRequest(`${apiConfig.order}/api/tickets/${id}/status`);
+  },
   list(token) {
     return httpRequest(`${apiConfig.order}/api/ordenes-servicio`, { headers: bearerHeaders(token) });
   },
@@ -14,5 +17,8 @@ export const orderService = {
       headers: bearerHeaders(token),
       body: JSON.stringify(data),
     });
+  },
+  delete(token, id) {
+    return httpRequest(`${apiConfig.order}/api/ordenes-servicio/${id}`, { method: "DELETE", headers: bearerHeaders(token) });
   },
 };

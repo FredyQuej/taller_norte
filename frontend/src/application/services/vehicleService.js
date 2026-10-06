@@ -8,4 +8,13 @@ export const vehicleService = {
   createVehicle(token, data) {
     return httpRequest(`${apiConfig.vehicle}/api/vehiculos`, { method: "POST", headers: bearerHeaders(token), body: JSON.stringify(data) });
   },
+  getVehicle(token, id) {
+    return httpRequest(`${apiConfig.vehicle}/api/vehiculos/${id}`, { headers: bearerHeaders(token) });
+  },
+  updateVehicle(token, id, data) {
+    return httpRequest(`${apiConfig.vehicle}/api/vehiculos/${id}`, { method: "PUT", headers: bearerHeaders(token), body: JSON.stringify(data) });
+  },
+  deleteVehicle(token, id) {
+    return httpRequest(`${apiConfig.vehicle}/api/vehiculos/${id}`, { method: "DELETE", headers: bearerHeaders(token) });
+  },
 };

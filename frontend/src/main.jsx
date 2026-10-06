@@ -22,11 +22,15 @@ import { orderService } from "./application/services/orderService";
 import { serviceService } from "./application/services/serviceService";
 import { vehicleService } from "./application/services/vehicleService";
 import { clearSession, getSession, saveSession } from "./infrastructure/storage/sessionStorage";
-import { OwnerForm as OwnerFormView, OwnerList } from "./presentation/components/owners/OwnerComponents";
-import { OrderDetail, OrderForm, OrderList } from "./presentation/components/orders/OrderComponents";
-import { ServiceCatalog, ServiceForm as ServiceFormView } from "./presentation/components/services/ServiceComponents";
+import { OwnerForm as OwnerFormView } from "./presentation/components/owners/OwnerComponents";
+import { OrderDetail, OrderForm } from "./presentation/components/orders/OrderComponents";
+import { ServiceForm as ServiceFormView } from "./presentation/components/services/ServiceComponents";
 import { VehicleForm as VehicleFormView, VehicleHistory, VehicleList } from "./presentation/components/vehicles/VehicleComponents";
-import { UserForm, UserList } from "./presentation/components/users/UserComponents";
+import { UserForm } from "./presentation/components/users/UserComponents";
+import { OwnerList, ServiceCatalog, UserList } from "./presentation/components/AdminLists";
+import { OrderListWithTicketActions as OrderList } from "./presentation/components/orders/OrderListWithTicketActions";
+import { hasPermission } from "./presentation/components/common/Permissions";
+import { PublicTicket, ServiceTicket } from "./presentation/components/orders/TicketComponents";
 import "./styles.css";
 
 function formatCurrentDate() {
@@ -39,9 +43,7 @@ function formatCurrentDate() {
 }
 
 function Login({ onLogin }) {
-  const [registering, setRegistering] = useState(false);
   const [form, setForm] = useState({ correo: "admin@local.test", password: "Admin123*" });
-  const [registration, setRegistration] = useState({ nombre: "", correo: "", password: "", numero_orden: "", servicio: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -50,15 +52,8 @@ function Login({ onLogin }) {
     setError("");
     setLoading(true);
     try {
-      if (registering) {
-        await authService.registerPublic(registration);
-        setForm({ correo: registration.correo, password: registration.password });
-        setRegistration({ nombre: "", correo: "", password: "", numero_orden: "", servicio: "" });
-        setRegistering(false);
-      } else {
-        const data = await authService.login(form);
-        onLogin(data);
-      }
+      const data = await authService.login(form);
+      onLogin(data);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -80,18 +75,16 @@ function Login({ onLogin }) {
       <section className="login-panel">
         <div className="login-form-wrap">
           <div className="mobile-brand brand"><Wrench size={19} /> TALLER NORTE</div>
-          <span className="eyebrow">{registering ? "NUEVA CUENTA" : "BIENVENIDO DE VUELTA"}</span>
-          <h2>{registering ? <>Crea tu cuenta<br />de trabajo.</> : <>Entra a tu espacio<br />de trabajo.</>}</h2>
-          <p className="muted">{registering ? "Tu cuenta se creará como Cliente para consultar tu servicio." : "Usa tus credenciales para continuar."}</p>
+          <span className="eyebrow">BIENVENIDO DE VUELTA</span>
+          <h2>Entra a tu espacio<br />de trabajo.</h2>
+          <p className="muted">Usa tus credenciales para continuar.</p>
           <form onSubmit={submit} className="stack-form">
-            {registering && <label>Nombre completo<input value={registration.nombre} onChange={(e) => setRegistration({ ...registration, nombre: e.target.value })} required /></label>}
-            <label>Correo electrónico<input type="email" value={registering ? registration.correo : form.correo} onChange={(e) => registering ? setRegistration({ ...registration, correo: e.target.value }) : setForm({ ...form, correo: e.target.value })} required /></label>
-            <label>Contraseña<input type="password" minLength="8" value={registering ? registration.password : form.password} onChange={(e) => registering ? setRegistration({ ...registration, password: e.target.value }) : setForm({ ...form, password: e.target.value })} required /></label>
-            {registering && <><label>Número de orden<input placeholder="Ej. OS-0006" value={registration.numero_orden} onChange={(e) => setRegistration({ ...registration, numero_orden: e.target.value })} required /></label><label>Servicio realizado<input placeholder="Ej. Diagnóstico Computarizado" value={registration.servicio} onChange={(e) => setRegistration({ ...registration, servicio: e.target.value })} required /></label></>}
+            <label>Correo electrónico<input type="email" value={form.correo} onChange={(e) => setForm({ ...form, correo: e.target.value })} required /></label>
+            <label>Contraseña<input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></label>
             {error && <div className="alert error">{error}</div>}
-            <button className="button primary full" disabled={loading}>{loading ? (registering ? "Registrando..." : "Ingresando...") : (registering ? "Crear cuenta" : "Ingresar al panel")}<ChevronRight size={18} /></button>
+            <button className="button primary full" disabled={loading}>{loading ? "Ingresando..." : "Ingresar al panel"}<ChevronRight size={18} /></button>
           </form>
-          <p className="login-hint">{registering ? <>¿Ya tienes cuenta? <button type="button" className="link-button" onClick={() => { setRegistering(false); setError(""); }}>Iniciar sesión</button></> : <>¿No tienes cuenta? <button type="button" className="link-button" onClick={() => { setRegistering(true); setError(""); }}>Registrarte</button></>}</p>
+          <p className="login-hint">El acceso es creado por un superusuario.</p>
         </div>
       </section>
     </main>
@@ -103,16 +96,21 @@ function Modal({ title, onClose, children }) {
 }
 
 function OwnerForm({ token, onDone, onCancel }) {
-  const [form, setForm] = useState({ tipo: "INDIVIDUAL", nombre: "", telefono: "", correo: "", direccion: "" });
+  const [form, setForm] = useState({ tipo: "INDIVIDUAL", nombre: "", nit: "", telefono: "", correo: "", direccion: "" });
   const [error, setError] = useState("");
   async function submit(event) {
     event.preventDefault();
+    const currentSession = getSession();
+    if (!hasPermission(currentSession?.usuario?.permisos, "propietarios", "crear", currentSession?.usuario?.rol)) {
+      setError("Usuario no autorizado");
+      return;
+    }
     try {
       await ownerService.create(token, form);
       onDone();
     } catch (requestError) { setError(requestError.message); }
   }
-  return <form onSubmit={submit} className="stack-form"><div className="form-grid"><label>Tipo<select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}><option value="INDIVIDUAL">Individual</option><option value="EMPRESA">Empresa</option></select></label><label>Nombre completo<input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} required /></label><label>Teléfono<input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} /></label><label>Correo<input type="email" value={form.correo} onChange={(e) => setForm({ ...form, correo: e.target.value })} /></label><label className="wide">Dirección<input value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} /></label></div>{error && <div className="alert error">{error}</div>}<div className="modal-actions"><button type="button" className="button ghost" onClick={onCancel}>Cancelar</button><button className="button primary"><Check size={17} /> Guardar propietario</button></div></form>;
+  return <form onSubmit={submit} className="stack-form"><div className="form-grid"><label>Tipo<select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}><option value="INDIVIDUAL">Individual</option><option value="EMPRESA">Empresa</option></select></label><label>Nombre completo<input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} required /></label><label>NIT<input value={form.nit} onChange={(e) => setForm({ ...form, nit: e.target.value })} placeholder="Ej. 1234567-8 o CF" /></label><label>Teléfono<input value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} /></label><label>Correo<input type="email" value={form.correo} onChange={(e) => setForm({ ...form, correo: e.target.value })} /></label><label className="wide">Dirección<input value={form.direccion} onChange={(e) => setForm({ ...form, direccion: e.target.value })} /></label></div>{error && <div className="alert error">{error}</div>}<div className="modal-actions"><button type="button" className="button ghost" onClick={onCancel}>Cancelar</button><button className="button primary"><Check size={17} /> Guardar propietario</button></div></form>;
 }
 
 function VehicleForm({ token, owners, onDone, onCancel }) {
@@ -434,6 +432,7 @@ function App({ session, onLogout }) {
   const [modal, setModal] = useState("");
   const [modalData, setModalData] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
+    const [selectedTicket, setSelectedTicket] = useState(null);
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [vehicleHistory, setVehicleHistory] = useState([]);
   const [orderFilters, setOrderFilters] = useState({ estado: "TODOS", vehiculo: "TODOS" });
@@ -464,8 +463,15 @@ function App({ session, onLogout }) {
   const filteredVehicles = vehicles.filter((vehicle) => `${vehicle.placa} ${vehicle.marca} ${vehicle.modelo} ${vehicle.propietario || ""}`.toLowerCase().includes(search.toLowerCase()));
   const isSuperUser = session.usuario.rol === "SUPER_USUARIO" || session.usuario.rol === "ADMIN";
   const canManageCatalog = isSuperUser || session.usuario.rol === "ENCARGADO";
+  const permissions = session.usuario.permisos || {};
+  function authorized(module, action, callback) {
+    return (...args) => {
+      if (permissions?.[module]?.[action] === true || isSuperUser) return callback(...args);
+      setError("Usuario no autorizado");
+    };
+  }
   const nav = isClient ? [{ id: "orders", label: "Mis servicios", icon: ShieldCheck }] : [{ id: "overview", label: "Resumen", icon: Wrench }, { id: "owners", label: "Propietarios", icon: UsersRound }, { id: "vehicles", label: "Vehículos", icon: CarFront }, ...(canManageCatalog ? [{ id: "services", label: "Servicios", icon: Wrench }] : []), { id: "orders", label: "Órdenes", icon: ShieldCheck }, ...(isSuperUser ? [{ id: "users", label: "Usuarios", icon: UserPlus }] : [])];
-  const title = active === "overview" ? "Resumen operativo" : active === "owners" ? "Propietarios" : active === "vehicles" ? "Vehículos" : active === "services" ? "Servicios" : active === "users" ? "Usuarios" : active === "orders" && isClient ? "Mis servicios" : active === "order-detail" ? "Detalle de orden" : active === "vehicle-history" ? "Historial del vehículo" : "Órdenes";
+  const title = active === "overview" ? "Resumen operativo" : active === "owners" ? "Propietarios" : active === "vehicles" ? "Vehículos" : active === "services" ? "Servicios" : active === "users" ? "Usuarios" : active === "ticket" ? "Ticket de orden" : active === "orders" && isClient ? "Mis servicios" : active === "order-detail" ? "Detalle de orden" : active === "vehicle-history" ? "Historial del vehículo" : "Órdenes";
 
   function changeSection(id) {
     setActive(id);
@@ -503,13 +509,17 @@ function App({ session, onLogout }) {
     setModalData(order);
   }
 
+  function openTicket(order) {
+    window.location.href = `${window.location.origin}/?ticket=${order.id}`;
+  }
+
   function modalDone() {
     setModal("");
     setModalData(null);
     loadData();
   }
 
-  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="brand"><Wrench size={19} /> TALLER NORTE</div><div className="side-label">OPERACIÓN</div><nav>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "active" : ""} onClick={() => changeSection(id)}><Icon size={18} />{label}{active === id && <ChevronRight size={15} className="nav-arrow" />}</button>)}</nav><div className="sidebar-bottom"><div className="user-card"><div className="avatar"><CircleUserRound size={20} /></div><div><strong>{session.usuario.nombre}</strong><span>{session.usuario.rol}</span></div></div><button className="logout" onClick={onLogout}><LogOut size={16} /> Cerrar sesión</button></div></aside><main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div><span className="eyebrow">{formatCurrentDate()}</span><h1>{title}</h1></div><div className="topbar-user"><span>Sesión activa</span><div className="avatar small"><UserRound size={17} /></div></div></header>{error && <div className="alert error page-alert">{error}</div>}{active === "overview" && <Overview owners={owners} vehicles={vehicles} onSection={changeSection} />} {active === "owners" && <OwnerList items={filteredOwners} search={search} setSearch={setSearch} onAdd={() => setModal("owner")} />} {active === "vehicles" && <VehicleList items={filteredVehicles} search={search} setSearch={setSearch} onAdd={() => setModal("vehicle")} onViewHistory={openVehicleHistory} />} {active === "vehicle-history" && selectedVehicle && <VehicleHistory vehicle={selectedVehicle} history={vehicleHistory} onBack={() => changeSection("vehicles")} />} {active === "services" && canManageCatalog && <ServiceCatalog services={services} onAdd={() => openServiceModal()} onEdit={openServiceModal} />} {active === "orders" && <OrderList orders={orders} vehicles={vehicles} services={services} filters={orderFilters} onFiltersChange={setOrderFilters} onAdd={() => openOrderModal()} onDetail={(order) => { setSelectedOrder(order); setActive("order-detail"); }} onEdit={openOrderModal} />} {active === "users" && isSuperUser && <UserList users={users} onAdd={() => setModal("user")} />} {active === "order-detail" && selectedOrder && <OrderDetail order={selectedOrder} onBack={() => changeSection("orders")} onEdit={openOrderModal} />}</main>{modal === "owner" && <Modal title="Registrar propietario" onClose={() => setModal("")}><OwnerFormView token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "vehicle" && <Modal title="Registrar vehículo" onClose={() => setModal("")}><VehicleFormView token={session.token} owners={owners} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "service" && <Modal title={modalData?.id ? "Editar servicio" : "Registrar servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceFormView token={session.token} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "order" && <Modal title={modalData?.id ? "Editar orden de servicio" : "Registrar orden de servicio"} onClose={() => { setModal(""); setModalData(null); }}><OrderForm token={session.token} vehicles={vehicles} services={services} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "user" && isSuperUser && <Modal title="Registrar usuario" onClose={() => setModal("")}><UserForm token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}</div>;
+  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="brand"><Wrench size={19} /> TALLER NORTE</div><div className="side-label">OPERACIÓN</div><nav>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "active" : ""} onClick={() => changeSection(id)}><Icon size={18} />{label}{active === id && <ChevronRight size={15} className="nav-arrow" />}</button>)}</nav><div className="sidebar-bottom"><div className="user-card"><div className="avatar"><CircleUserRound size={20} /></div><div><strong>{session.usuario.nombre}</strong><span>{session.usuario.rol}</span></div></div><button className="logout" onClick={onLogout}><LogOut size={16} /> Cerrar sesión</button></div></aside><main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div><span className="eyebrow">{formatCurrentDate()}</span><h1>{title}</h1></div><div className="topbar-user"><span>Sesión activa</span><div className="avatar small"><UserRound size={17} /></div></div></header>{error && <div className="alert error page-alert">{error}</div>}{active === "overview" && <Overview owners={owners} vehicles={vehicles} onSection={changeSection} />} {active === "owners" && <OwnerList items={filteredOwners} search={search} setSearch={setSearch} permissions={permissions} onAdd={() => setModal("owner")} />} {active === "vehicles" && <VehicleList items={filteredVehicles} search={search} setSearch={setSearch} onAdd={() => setModal("vehicle")} onViewHistory={openVehicleHistory} />} {active === "vehicle-history" && selectedVehicle && <VehicleHistory vehicle={selectedVehicle} history={vehicleHistory} onBack={() => changeSection("vehicles")} />} {active === "services" && canManageCatalog && <ServiceCatalog services={services} onAdd={() => openServiceModal()} onEdit={openServiceModal} />} {active === "orders" && <OrderList orders={orders} vehicles={vehicles} services={services} filters={orderFilters} onFiltersChange={setOrderFilters} onAdd={() => openOrderModal()} onDetail={(order) => { setSelectedOrder(order); setActive("order-detail"); }} onEdit={openOrderModal} />} {active === "users" && isSuperUser && <UserList users={users} onAdd={() => setModal("user")} />} {active === "order-detail" && selectedOrder && <OrderDetail order={selectedOrder} onBack={() => changeSection("orders")} onEdit={openOrderModal} />}</main>{modal === "owner" && <Modal title="Registrar propietario" onClose={() => setModal("")}><OwnerFormView token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "vehicle" && <Modal title="Registrar vehículo" onClose={() => setModal("")}><VehicleFormView token={session.token} owners={owners} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "service" && <Modal title={modalData?.id ? "Editar servicio" : "Registrar servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceFormView token={session.token} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "order" && <Modal title={modalData?.id ? "Editar orden de servicio" : "Registrar orden de servicio"} onClose={() => { setModal(""); setModalData(null); }}><OrderForm token={session.token} vehicles={vehicles} services={services} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "user" && isSuperUser && <Modal title="Registrar usuario" onClose={() => setModal("")}><UserForm token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}</div>;
 }
 
 function Overview({ owners, vehicles, onSection }) {
@@ -566,6 +576,41 @@ function VehicleHistorySection({ vehicle, history, onBack }) {
 
 function ResourceSection({ type, items, search, setSearch, onAdd, onViewHistory }) { const isOwners = type === "owners"; return <section className="content"><div className="section-toolbar"><div><p className="muted">{isOwners ? "Directorio de clientes" : "Inventario de unidades"}</p><h2>{isOwners ? "Todos los propietarios" : "Todos los vehículos"}</h2></div><button className="button primary" onClick={onAdd}><Plus size={17} /> {isOwners ? "Nuevo propietario" : "Nuevo vehículo"}</button></div><div className="list-toolbar"><div className="search-box"><Search size={17} /><input placeholder={isOwners ? "Buscar por nombre, correo..." : "Buscar por placa, marca, propietario..."} value={search} onChange={(e) => setSearch(e.target.value)} /></div><span className="result-count">{items.length} registros</span></div>{items.length === 0 ? <div className="empty"><div className="empty-icon">{isOwners ? <UsersRound size={26} /> : <CarFront size={26} />}</div><h3>No hay registros todavía</h3><p>Empieza agregando {isOwners ? "un propietario" : "un vehículo"} al sistema.</p><button className="button secondary" onClick={onAdd}><Plus size={16} /> Crear registro</button></div> : <div className="table-wrap"><table><thead><tr>{isOwners ? <><th>Nombre</th><th>Tipo</th><th>Contacto</th><th>Estado</th></> : <><th>Vehículo</th><th>Propietario</th><th>Placa</th><th>Kilometraje</th><th>Estado</th><th>Acciones</th></>}</tr></thead><tbody>{items.map((item) => isOwners ? <tr key={item.id}><td><strong>{item.nombre}</strong><small>ID #{item.id}</small></td><td><span className="tag">{item.tipo}</span></td><td>{item.telefono || item.correo || "Sin contacto"}</td><td><span className="status"><i /> Activo</span></td></tr> : <tr key={item.id}><td><strong>{item.marca} {item.modelo}</strong><small>{item.tipo} · {item.anio}</small></td><td>{item.propietario}</td><td><span className="plate">{item.placa}</span></td><td>{Number(item.kilometraje_actual).toLocaleString("es-GT")} km</td><td><span className="status"><i /> {item.estado}</span></td><td><button className="button secondary" onClick={() => onViewHistory(item)}>Historial</button></td></tr>)}</tbody></table></div>}</section>; }
 
-function Root() { const [session, setSession] = useState(getSession); function login(data) { saveSession(data); setSession(data); } function logout() { clearSession(); setSession(null); } return session ? <App session={session} onLogout={logout} /> : <Login onLogin={login} />; }
+function Root() {
+  const [session, setSession] = useState(getSession);
+  const ticketId = new URLSearchParams(window.location.search).get("ticket");
+
+  useEffect(() => {
+    const iconLabels = {
+      "lucide-eye": "Ver información",
+      "lucide-pencil": "Editar registro",
+      "lucide-trash-2": "Eliminar registro",
+      "lucide-printer": "Imprimir ticket",
+      "lucide-download": "Descargar PDF",
+      "lucide-plus": "Crear nuevo registro",
+      "lucide-history": "Consultar historial",
+    };
+    const updateButtonTitles = () => {
+      document.querySelectorAll("button").forEach((button) => {
+        if (button.title && button.dataset.autoTitle !== "true") return;
+        const icon = button.querySelector("svg");
+        const iconLabel = icon && [...icon.classList].map((name) => iconLabels[name]).find(Boolean);
+        const label = button.getAttribute("aria-label") || button.textContent.trim() || iconLabel;
+        if (label && button.title !== label) {
+          button.title = label;
+          button.dataset.autoTitle = "true";
+        }
+      });
+    };
+    updateButtonTitles();
+    const observer = new MutationObserver(updateButtonTitles);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
+
+  function login(data) { saveSession(data); setSession(data); }
+  function logout() { clearSession(); setSession(null); }
+  return ticketId ? <PublicTicket /> : session ? <App session={session} onLogout={logout} /> : <Login onLogin={login} />;
+}
 
 createRoot(document.getElementById("root")).render(<Root />);

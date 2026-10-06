@@ -41,6 +41,9 @@ const requireRole = (...roles) => (req, res, next) => roles.includes(req.user?.r
   ? next()
   : res.status(403).json({ error: 'No tiene permisos para esta operación' });
 
+const requirePermission = (module, action) => (req, res, next) => ['ADMIN', 'SUPER_USUARIO'].includes(req.user?.rol) || req.user?.permisos?.[module]?.[action] === true
+  ? next() : res.status(403).json({ error: 'No tiene el permiso requerido' });
+
 const parseServicePayload = (body) => ({
   nombre: body.nombre,
   descripcion: body.descripcion || '',
@@ -93,7 +96,7 @@ app.get('/api/servicios/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/servicios', authenticateToken, requireRole('ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
+app.post('/api/servicios', authenticateToken, requirePermission('servicios', 'crear'), async (req, res) => {
   const payload = parseServicePayload(req.body);
 
   try {
@@ -111,7 +114,7 @@ app.post('/api/servicios', authenticateToken, requireRole('ENCARGADO', 'SUPER_US
   }
 });
 
-app.put('/api/servicios/:id', authenticateToken, requireRole('ENCARGADO', 'SUPER_USUARIO'), async (req, res) => {
+app.put('/api/servicios/:id', authenticateToken, requirePermission('servicios', 'editar'), async (req, res) => {
   const { id } = req.params;
   const payload = parseServicePayload(req.body);
 
@@ -132,6 +135,18 @@ app.put('/api/servicios/:id', authenticateToken, requireRole('ENCARGADO', 'SUPER
   } catch (error) {
     console.error('Error updating servicio:', error);
     res.status(500).json({ error: 'Error al actualizar servicio' });
+  }
+});
+
+app.delete('/api/servicios/:id', authenticateToken, requirePermission('servicios', 'eliminar'), async (req, res) => {
+  try {
+    const result = await pool.query('DELETE FROM servicios WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Servicio no encontrado' });
+    return res.json({ id: result.rows[0].id, eliminado: true });
+  } catch (error) {
+    if (error.code === '23503') return res.status(409).json({ error: 'No se puede eliminar: el servicio está asociado a órdenes' });
+    console.error('Error deleting servicio:', error);
+    return res.status(500).json({ error: 'Error al eliminar servicio' });
   }
 });
 

@@ -8,12 +8,6 @@ export const authService = {
       body: JSON.stringify(credentials),
     });
   },
-  registerPublic(data) {
-    return httpRequest(`${apiConfig.auth}/api/auth/register-public`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  },
   listUsers(token) {
     return httpRequest(`${apiConfig.auth}/api/auth/users`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -24,6 +18,19 @@ export const authService = {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify(data),
+    });
+  },
+  updateUser(token, id, data) {
+    return httpRequest(`${apiConfig.auth}/api/auth/users/${id}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(data),
+    });
+  },
+  deleteUser(token, id) {
+    return httpRequest(`${apiConfig.auth}/api/auth/users/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
     });
   },
 };

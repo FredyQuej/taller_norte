@@ -56,7 +56,10 @@ The domain components are composed by `main.jsx`, while their data operations re
 - **RECEPCIONISTA:** consulta propietarios, vehículos, servicios y órdenes; puede registrar órdenes nuevas.
 - **ENCARGADO:** permisos operativos del recepcionista, además de crear y actualizar propietarios, vehículos y servicios, y actualizar órdenes.
 - **SUPER_USUARIO:** todos los permisos operativos y administración de usuarios.
+- **ADMIN:** administración de usuarios, asignación de roles y permisos operativos de administración.
 
 User registration is available from the **Usuarios** module and is protected by the auth service. The backend validates the role on every protected operation; hiding navigation items in the frontend is only an additional usability layer.
 
-The login screen provides client self-registration through `POST /api/auth/register-public`. Registration requires the order number (for example `OS-0006`) and the exact service name. The backend validates both values, associates the account with the order's vehicle owner, and assigns the `CLIENTE` role. A client can only view their own service orders and history; operation modules remain hidden and write operations are rejected by the backend.
+Client self-registration has been removed from the login screen. Customers now receive a service ticket with a QR code. Scanning it opens `/?ticket=ID`, which calls the public status endpoint and shows only the order status, vehicle, service, and date. No customer account or login is required to consult the ticket.
+
+Each user also stores a granular permission matrix for `propietarios`, `vehiculos`, `servicios`, `ordenes` and `usuarios`, with the actions `consultar`, `crear`, `editar` and `eliminar`. Administrators can customize this matrix when creating or editing a user. The selected permissions are included in the authentication token and enforced by the domain services.
