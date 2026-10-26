@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS ordenes_servicio (
   vehiculo_id BIGINT NOT NULL REFERENCES vehiculos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
   servicio_id BIGINT NOT NULL REFERENCES servicios(id) ON UPDATE CASCADE ON DELETE RESTRICT,
   fecha_ingreso DATE NOT NULL DEFAULT CURRENT_DATE,
+  fecha_proximo_servicio DATE,
   descripcion TEXT NOT NULL,
   estado VARCHAR(30) NOT NULL DEFAULT 'PENDIENTE' CHECK (estado IN ('PENDIENTE','EN_PROCESO','COMPLETADO','CANCELADO')),
   prioridad VARCHAR(20) NOT NULL DEFAULT 'MEDIA' CHECK (prioridad IN ('BAJA','MEDIA','ALTA')),
@@ -76,6 +77,65 @@ CREATE TABLE IF NOT EXISTS ordenes_servicio (
   observaciones TEXT,
   creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_proximo_servicio DATE;
+
+CREATE TABLE IF NOT EXISTS inventario_articulos (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  sku VARCHAR(60) UNIQUE,
+  nombre VARCHAR(150) NOT NULL,
+  tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('REPUESTO','ACCESORIO')),
+  descripcion TEXT,
+  unidad VARCHAR(30) NOT NULL DEFAULT 'unidad',
+  stock_actual NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (stock_actual >= 0),
+  stock_minimo NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (stock_minimo >= 0),
+  precio_compra NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (precio_compra >= 0),
+  precio_venta NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (precio_venta >= 0),
+  activo BOOLEAN NOT NULL DEFAULT TRUE,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ordenes_articulos (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  orden_servicio_id BIGINT NOT NULL REFERENCES ordenes_servicio(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  articulo_id BIGINT NOT NULL REFERENCES inventario_articulos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  cantidad NUMERIC(12,2) NOT NULL CHECK (cantidad > 0),
+  precio_venta_unitario NUMERIC(12,2) NOT NULL CHECK (precio_venta_unitario >= 0),
+  precio_compra_unitario NUMERIC(12,2) NOT NULL CHECK (precio_compra_unitario >= 0),
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS movimientos_inventario (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  articulo_id BIGINT NOT NULL REFERENCES inventario_articulos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  usuario_id BIGINT REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL,
+  orden_servicio_id BIGINT REFERENCES ordenes_servicio(id) ON UPDATE CASCADE ON DELETE SET NULL,
+  tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('ENTRADA','SALIDA','CONSUMO_ORDEN')),
+  cantidad NUMERIC(12,2) NOT NULL CHECK (cantidad > 0),
+  costo_unitario NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (costo_unitario >= 0),
+  referencia VARCHAR(120),
+  observaciones TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ordenes_articulos_orden ON ordenes_articulos(orden_servicio_id);
+CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_articulo ON movimientos_inventario(articulo_id, creado_en DESC);
+
+CREATE TABLE IF NOT EXISTS recordatorios_servicio (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  orden_servicio_id BIGINT NOT NULL REFERENCES ordenes_servicio(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  canal VARCHAR(20) NOT NULL CHECK (canal IN ('EMAIL','WHATSAPP')),
+  fecha_proximo_servicio DATE NOT NULL,
+  estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE' CHECK (estado IN ('PENDIENTE','ENVIADO','ERROR')),
+  intentos INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+  error TEXT,
+  ultimo_intento_en TIMESTAMPTZ,
+  enviado_en TIMESTAMPTZ,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (orden_servicio_id, canal, fecha_proximo_servicio)
 );
 
 CREATE INDEX IF NOT EXISTS idx_ordenes_servicio_vehiculo ON ordenes_servicio(vehiculo_id);

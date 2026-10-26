@@ -46,7 +46,7 @@ export function PublicTicket() {
     const qrData = qr || await QRCode.toDataURL(publicUrl, { width: 240, margin: 1 });
     const width = Number(paperWidth);
     const maxTextChars = width === 58 ? 25 : 38;
-    const pdfRows = [["ESTADO", ticket.estado], ["VEHICULO", `${ticket.marca} ${ticket.modelo}`], ["PLACA", ticket.placa], ["SERVICIO", ticket.servicio], ["FECHA", String(ticket.fecha_ingreso).slice(0, 10)], ["PRIORIDAD", ticket.prioridad], ["COSTO", `Q ${Number(ticket.costo || 0).toFixed(2)}`], ["DESCRIPCION", ticket.descripcion]];
+    const pdfRows = [["ESTADO", ticket.estado], ["VEHICULO", `${ticket.marca} ${ticket.modelo}`], ["PLACA", ticket.placa], ["SERVICIO", ticket.servicio], ["FECHA DE INGRESO", String(ticket.fecha_ingreso).slice(0, 10)], ["KILOMETRAJE AL INGRESO", `${Number(ticket.kilometraje || 0).toLocaleString("es-GT")} km`], ["PROXIMO SERVICIO ESTIMADO", ticket.fecha_proximo_servicio ? String(ticket.fecha_proximo_servicio).slice(0, 10) : "No estimada"], ["PRIORIDAD", ticket.prioridad], ["COSTO", `Q ${Number(ticket.costo || 0).toFixed(2)}`], ["DESCRIPCION", ticket.descripcion]];
     const estimatedContent = pdfRows.reduce((height, [, value]) => height + Math.max(1, Math.ceil(String(value || "-").length / maxTextChars)) * 4.2 + 7, 0);
     const height = Math.max(145, Math.ceil(estimatedContent + 82));
     const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [width, height] });
@@ -83,5 +83,22 @@ export function PublicTicket() {
     pdf.save(`ticket-OS-${String(ticket.id).padStart(4, "0")}.pdf`);
   }
 
-  return <main className={`public-ticket ticket-paper-${paperWidth}`}><div className="ticket-tools no-print"><button className="button ghost" onClick={() => { window.location.href = "/"; }}><ArrowLeft size={16} /> Volver</button><label>Impresora<select value={paperWidth} onChange={(event) => setPaperWidth(event.target.value)}><option value="80">Térmica 80 mm</option><option value="58">Térmica 58 mm</option></select></label><button className="button secondary" onClick={downloadPdf}><Download size={16} /> Descargar PDF</button><button className="button primary" onClick={() => window.print()}><Printer size={16} /> Imprimir</button></div><article className="service-ticket"><div className="public-ticket-heading"><div><span className="eyebrow">TALLER NORTE</span><h1>Estado de servicio</h1><p className="ticket-number">OS-{String(ticket.id).padStart(4, "0")}</p></div>{qr && <img className="ticket-qr" src={qr} alt="Código QR del ticket" />}</div><div className="ticket-status"><ShieldCheck size={18} /><span>Estado actual</span><strong>{ticket.estado}</strong></div><div className="ticket-grid"><div><span>Vehículo</span><strong>{ticket.marca} {ticket.modelo}</strong></div><div><span>Placa</span><strong>{ticket.placa}</strong></div><div><span>Servicio</span><strong>{ticket.servicio}</strong></div><div><span>Fecha de ingreso</span><strong>{String(ticket.fecha_ingreso).slice(0, 10)}</strong></div><div><span>Prioridad</span><strong>{ticket.prioridad}</strong></div><div><span>Costo</span><strong>Q {Number(ticket.costo || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div></div><p>{ticket.descripcion}</p><footer>Escanea el código QR para consultar el estado actualizado de tu servicio.</footer></article></main>;
+  return <main className={`public-ticket ticket-paper-${paperWidth}`}>
+    <div className="ticket-tools no-print"><button className="button ghost" onClick={() => { window.location.href = "/"; }}><ArrowLeft size={16} /> Volver</button><label>Impresora<select value={paperWidth} onChange={(event) => setPaperWidth(event.target.value)}><option value="80">Térmica 80 mm</option><option value="58">Térmica 58 mm</option></select></label><button className="button secondary" onClick={downloadPdf}><Download size={16} /> Descargar PDF</button><button className="button primary" onClick={() => window.print()}><Printer size={16} /> Imprimir</button></div>
+    <article className="service-ticket">
+      <div className="public-ticket-heading"><div><span className="eyebrow">TALLER NORTE</span><h1>Estado de servicio</h1><p className="ticket-number">OS-{String(ticket.id).padStart(4, "0")}</p></div>{qr && <img className="ticket-qr" src={qr} alt="Código QR del ticket" />}</div>
+      <div className="ticket-status"><ShieldCheck size={18} /><span>Estado actual</span><strong>{ticket.estado}</strong></div>
+      <div className="ticket-grid">
+        <div><span>Vehículo</span><strong>{ticket.marca} {ticket.modelo}</strong></div>
+        <div><span>Placa</span><strong>{ticket.placa}</strong></div>
+        <div><span>Servicio</span><strong>{ticket.servicio}</strong></div>
+        <div><span>Fecha de ingreso</span><strong>{String(ticket.fecha_ingreso).slice(0, 10)}</strong></div>
+        <div><span>Kilometraje al ingreso</span><strong>{Number(ticket.kilometraje || 0).toLocaleString("es-GT")} km</strong></div>
+        <div><span>Próximo servicio estimado</span><strong>{ticket.fecha_proximo_servicio ? String(ticket.fecha_proximo_servicio).slice(0, 10) : "No estimada"}</strong></div>
+        <div><span>Prioridad</span><strong>{ticket.prioridad}</strong></div>
+        <div><span>Costo</span><strong>Q {Number(ticket.costo || 0).toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+      </div>
+      <p>{ticket.descripcion}</p><footer>Escanea el QR para consultar el estado actualizado de tu servicio.</footer>
+    </article>
+  </main>;
 }

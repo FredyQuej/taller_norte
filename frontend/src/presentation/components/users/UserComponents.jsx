@@ -16,12 +16,13 @@ const permissionModules = [
   ["vehiculos", "Vehículos"],
   ["servicios", "Servicios"],
   ["ordenes", "Órdenes de servicio"],
+  ["inventario", "Inventario"],
   ["usuarios", "Usuarios"],
 ];
 const permissionActions = ["consultar", "crear", "editar", "eliminar"];
 const rolePermissions = {
-  RECEPCIONISTA: { propietarios: { consultar: true }, vehiculos: { consultar: true }, servicios: { consultar: true }, ordenes: { consultar: true, crear: true } },
-  ENCARGADO: { propietarios: { consultar: true, crear: true, editar: true }, vehiculos: { consultar: true, crear: true, editar: true }, servicios: { consultar: true, crear: true, editar: true }, ordenes: { consultar: true, crear: true, editar: true } },
+  RECEPCIONISTA: { propietarios: { consultar: true }, vehiculos: { consultar: true }, servicios: { consultar: true }, ordenes: { consultar: true, crear: true }, inventario: { consultar: true } },
+  ENCARGADO: { propietarios: { consultar: true, crear: true, editar: true }, vehiculos: { consultar: true, crear: true, editar: true }, servicios: { consultar: true, crear: true, editar: true }, ordenes: { consultar: true, crear: true, editar: true }, inventario: { consultar: true, crear: true, editar: true } },
   ADMIN: {},
   SUPER_USUARIO: {},
   CLIENTE: { ordenes: { consultar: true } },

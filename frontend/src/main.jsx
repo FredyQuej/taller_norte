@@ -2,11 +2,15 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import {
   CarFront,
+  BellRing,
+  CalendarClock,
   Check,
   ChevronRight,
   CircleUserRound,
+  CircleAlert,
   LogOut,
   Menu,
+  PackageSearch,
   Plus,
   Search,
   ShieldCheck,
@@ -20,6 +24,7 @@ import { authService } from "./application/services/authService";
 import { ownerService } from "./application/services/ownerService";
 import { orderService } from "./application/services/orderService";
 import { serviceService } from "./application/services/serviceService";
+import { getMaintenanceSchedule } from "./application/services/maintenanceSchedule";
 import { vehicleService } from "./application/services/vehicleService";
 import { clearSession, getSession, saveSession } from "./infrastructure/storage/sessionStorage";
 import { OwnerForm as OwnerFormView } from "./presentation/components/owners/OwnerComponents";
@@ -29,6 +34,8 @@ import { VehicleForm as VehicleFormView, VehicleHistory, VehicleList } from "./p
 import { UserForm } from "./presentation/components/users/UserComponents";
 import { OwnerList, ServiceCatalog, UserList } from "./presentation/components/AdminLists";
 import { OrderListWithTicketActions as OrderList } from "./presentation/components/orders/OrderListWithTicketActions";
+import { ReminderDashboard } from "./presentation/components/reminders/ReminderDashboard";
+import { InventoryDashboard } from "./presentation/components/inventory/InventoryDashboard";
 import { hasPermission } from "./presentation/components/common/Permissions";
 import { PublicTicket, ServiceTicket } from "./presentation/components/orders/TicketComponents";
 import "./styles.css";
@@ -420,9 +427,9 @@ function OrderDetailSection({ order, onBack, onEdit }) {
   );
 }
 
-function App({ session, onLogout }) {
+function App({ session, onLogout, initialSection }) {
   const isClient = session.usuario.rol === "CLIENTE";
-  const [active, setActive] = useState(isClient ? "orders" : "overview");
+  const [active, setActive] = useState(initialSection || (isClient ? "orders" : "overview"));
   const [owners, setOwners] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [services, setServices] = useState([]);
@@ -463,6 +470,7 @@ function App({ session, onLogout }) {
   const filteredVehicles = vehicles.filter((vehicle) => `${vehicle.placa} ${vehicle.marca} ${vehicle.modelo} ${vehicle.propietario || ""}`.toLowerCase().includes(search.toLowerCase()));
   const isSuperUser = session.usuario.rol === "SUPER_USUARIO" || session.usuario.rol === "ADMIN";
   const canManageCatalog = isSuperUser || session.usuario.rol === "ENCARGADO";
+  const canViewInventory = isSuperUser || permissions?.inventario?.consultar === true;
   const permissions = session.usuario.permisos || {};
   function authorized(module, action, callback) {
     return (...args) => {
@@ -470,8 +478,9 @@ function App({ session, onLogout }) {
       setError("Usuario no autorizado");
     };
   }
-  const nav = isClient ? [{ id: "orders", label: "Mis servicios", icon: ShieldCheck }] : [{ id: "overview", label: "Resumen", icon: Wrench }, { id: "owners", label: "Propietarios", icon: UsersRound }, { id: "vehicles", label: "Vehículos", icon: CarFront }, ...(canManageCatalog ? [{ id: "services", label: "Servicios", icon: Wrench }] : []), { id: "orders", label: "Órdenes", icon: ShieldCheck }, ...(isSuperUser ? [{ id: "users", label: "Usuarios", icon: UserPlus }] : [])];
-  const title = active === "overview" ? "Resumen operativo" : active === "owners" ? "Propietarios" : active === "vehicles" ? "Vehículos" : active === "services" ? "Servicios" : active === "users" ? "Usuarios" : active === "ticket" ? "Ticket de orden" : active === "orders" && isClient ? "Mis servicios" : active === "order-detail" ? "Detalle de orden" : active === "vehicle-history" ? "Historial del vehículo" : "Órdenes";
+  const canViewReminders = isSuperUser || permissions?.ordenes?.consultar === true;
+  const nav = isClient ? [{ id: "orders", label: "Mis servicios", icon: ShieldCheck }] : [{ id: "overview", label: "Resumen", icon: Wrench }, { id: "owners", label: "Propietarios", icon: UsersRound }, { id: "vehicles", label: "Vehículos", icon: CarFront }, ...(canManageCatalog ? [{ id: "services", label: "Servicios", icon: Wrench }] : []), { id: "orders", label: "Órdenes", icon: ShieldCheck }, ...(canViewInventory ? [{ id: "inventory", label: "Inventario", icon: PackageSearch }] : []), ...(canViewReminders ? [{ id: "reminders", label: "Recordatorios", icon: BellRing }] : []), ...(isSuperUser ? [{ id: "users", label: "Usuarios", icon: UserPlus }] : [])];
+  const title = active === "overview" ? "Resumen operativo" : active === "owners" ? "Propietarios" : active === "vehicles" ? "Vehículos" : active === "services" ? "Servicios" : active === "users" ? "Usuarios" : active === "inventory" ? "Inventario" : active === "reminders" ? "Recordatorios" : active === "ticket" ? "Ticket de orden" : active === "orders" && isClient ? "Mis servicios" : active === "order-detail" ? "Detalle de orden" : active === "vehicle-history" ? "Historial del vehículo" : "Órdenes";
 
   function changeSection(id) {
     setActive(id);
@@ -519,11 +528,61 @@ function App({ session, onLogout }) {
     loadData();
   }
 
-  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="brand"><Wrench size={19} /> TALLER NORTE</div><div className="side-label">OPERACIÓN</div><nav>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "active" : ""} onClick={() => changeSection(id)}><Icon size={18} />{label}{active === id && <ChevronRight size={15} className="nav-arrow" />}</button>)}</nav><div className="sidebar-bottom"><div className="user-card"><div className="avatar"><CircleUserRound size={20} /></div><div><strong>{session.usuario.nombre}</strong><span>{session.usuario.rol}</span></div></div><button className="logout" onClick={onLogout}><LogOut size={16} /> Cerrar sesión</button></div></aside><main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div><span className="eyebrow">{formatCurrentDate()}</span><h1>{title}</h1></div><div className="topbar-user"><span>Sesión activa</span><div className="avatar small"><UserRound size={17} /></div></div></header>{error && <div className="alert error page-alert">{error}</div>}{active === "overview" && <Overview owners={owners} vehicles={vehicles} onSection={changeSection} />} {active === "owners" && <OwnerList items={filteredOwners} search={search} setSearch={setSearch} permissions={permissions} onAdd={() => setModal("owner")} />} {active === "vehicles" && <VehicleList items={filteredVehicles} search={search} setSearch={setSearch} onAdd={() => setModal("vehicle")} onViewHistory={openVehicleHistory} />} {active === "vehicle-history" && selectedVehicle && <VehicleHistory vehicle={selectedVehicle} history={vehicleHistory} onBack={() => changeSection("vehicles")} />} {active === "services" && canManageCatalog && <ServiceCatalog services={services} onAdd={() => openServiceModal()} onEdit={openServiceModal} />} {active === "orders" && <OrderList orders={orders} vehicles={vehicles} services={services} filters={orderFilters} onFiltersChange={setOrderFilters} onAdd={() => openOrderModal()} onDetail={(order) => { setSelectedOrder(order); setActive("order-detail"); }} onEdit={openOrderModal} />} {active === "users" && isSuperUser && <UserList users={users} onAdd={() => setModal("user")} />} {active === "order-detail" && selectedOrder && <OrderDetail order={selectedOrder} onBack={() => changeSection("orders")} onEdit={openOrderModal} />}</main>{modal === "owner" && <Modal title="Registrar propietario" onClose={() => setModal("")}><OwnerFormView token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "vehicle" && <Modal title="Registrar vehículo" onClose={() => setModal("")}><VehicleFormView token={session.token} owners={owners} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "service" && <Modal title={modalData?.id ? "Editar servicio" : "Registrar servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceFormView token={session.token} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "order" && <Modal title={modalData?.id ? "Editar orden de servicio" : "Registrar orden de servicio"} onClose={() => { setModal(""); setModalData(null); }}><OrderForm token={session.token} vehicles={vehicles} services={services} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "user" && isSuperUser && <Modal title="Registrar usuario" onClose={() => setModal("")}><UserForm token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}</div>;
+  return <div className="app-shell"><aside className={`sidebar ${menuOpen ? "open" : ""}`}><div className="brand"><Wrench size={19} /> TALLER NORTE</div><div className="side-label">OPERACIÓN</div><nav>{nav.map(({ id, label, icon: Icon }) => <button key={id} className={active === id ? "active" : ""} onClick={() => changeSection(id)}><Icon size={18} />{label}{active === id && <ChevronRight size={15} className="nav-arrow" />}</button>)}</nav><div className="sidebar-bottom"><div className="user-card"><div className="avatar"><CircleUserRound size={20} /></div><div><strong>{session.usuario.nombre}</strong><span>{session.usuario.rol}</span></div></div><button className="logout" onClick={onLogout}><LogOut size={16} /> Cerrar sesión</button></div></aside><main className="main-content"><header className="topbar"><button className="menu-button" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div><span className="eyebrow">{formatCurrentDate()}</span><h1>{title}</h1></div><div className="topbar-user"><span>Sesión activa</span><div className="avatar small"><UserRound size={17} /></div></div></header>{error && <div className="alert error page-alert">{error}</div>}{active === "overview" && <Overview owners={owners} vehicles={vehicles} onSection={changeSection} />} {active === "owners" && <OwnerList items={filteredOwners} search={search} setSearch={setSearch} permissions={permissions} onAdd={() => setModal("owner")} />} {active === "vehicles" && <VehicleList items={filteredVehicles} search={search} setSearch={setSearch} onAdd={() => setModal("vehicle")} onViewHistory={openVehicleHistory} />} {active === "vehicle-history" && selectedVehicle && <VehicleHistory vehicle={selectedVehicle} history={vehicleHistory} onBack={() => changeSection("vehicles")} />} {active === "services" && canManageCatalog && <ServiceCatalog services={services} onAdd={() => openServiceModal()} onEdit={openServiceModal} />} {active === "orders" && <OrderList orders={orders} vehicles={vehicles} services={services} filters={orderFilters} onFiltersChange={setOrderFilters} onAdd={() => openOrderModal()} onDetail={(order) => { setSelectedOrder(order); setActive("order-detail"); }} onEdit={openOrderModal} />} {active === "users" && isSuperUser && <UserList users={users} onAdd={() => setModal("user")} />} {active === "order-detail" && selectedOrder && <OrderDetail order={selectedOrder} onBack={() => changeSection("orders")} onEdit={openOrderModal} />} {active === "inventory" && <InventoryDashboard token={session.token} />} {active === "reminders" && <ReminderDashboard token={session.token} />}</main>{modal === "owner" && <Modal title="Registrar propietario" onClose={() => setModal("")}><OwnerFormView token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "vehicle" && <Modal title="Registrar vehículo" onClose={() => setModal("")}><VehicleFormView token={session.token} owners={owners} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}{modal === "service" && <Modal title={modalData?.id ? "Editar servicio" : "Registrar servicio"} onClose={() => { setModal(""); setModalData(null); }}><ServiceFormView token={session.token} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "order" && <Modal title={modalData?.id ? "Editar orden de servicio" : "Registrar orden de servicio"} onClose={() => { setModal(""); setModalData(null); }}><OrderForm token={session.token} vehicles={vehicles} services={services} initialData={modalData} onDone={modalDone} onCancel={() => { setModal(""); setModalData(null); }} /></Modal>}{modal === "user" && isSuperUser && <Modal title="Registrar usuario" onClose={() => setModal("")}><UserForm token={session.token} onDone={modalDone} onCancel={() => setModal("")} /></Modal>}</div>;
 }
 
-function Overview({ owners, vehicles, onSection }) {
+function OverviewLegacy({ owners, vehicles, onSection }) {
   return <section className="content"><div className="welcome"><div><span className="eyebrow">PANEL DE CONTROL</span><h2>El pulso del taller, <em>al día.</em></h2><p>Consulta tus registros y mantén la operación ordenada.</p></div><div className="welcome-mark"><Wrench size={55} strokeWidth={1.2} /></div></div><div className="stat-grid"><Stat icon={UsersRound} label="Propietarios registrados" value={owners.length} /><Stat icon={CarFront} label="Vehículos en control" value={vehicles.length} /><Stat icon={ShieldCheck} label="Estado del sistema" value="Activo" accent /></div><div className="quick-grid"><QuickCard icon={UsersRound} title="Propietarios" detail="Registra y consulta clientes del taller." count={`${owners.length} registrados`} onClick={() => onSection("owners")} /><QuickCard icon={CarFront} title="Vehículos" detail="Mantén placas, kilometraje y estado al día." count={`${vehicles.length} registrados`} onClick={() => onSection("vehicles")} /></div></section>;
+}
+function Overview({ owners, vehicles, onSection }) {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const currentSession = getSession();
+    if (!currentSession?.token) {
+      setLoading(false);
+      return;
+    }
+    orderService.list(currentSession.token)
+      .then(setOrders)
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const scheduleFor = (order) => order.estado === "CANCELADO"
+    ? { status: "UNSCHEDULED", daysRemaining: null }
+    : getMaintenanceSchedule(order.fecha_proximo_servicio);
+  const upcomingCount = orders.filter((order) => scheduleFor(order).status === "UPCOMING").length;
+  const overdueCount = orders.filter((order) => scheduleFor(order).status === "OVERDUE").length;
+  const nextVisits = orders
+    .filter((order) => scheduleFor(order).status === "UPCOMING" || scheduleFor(order).status === "SCHEDULED")
+    .sort((left, right) => String(left.fecha_proximo_servicio).localeCompare(String(right.fecha_proximo_servicio)))
+    .slice(0, 6);
+
+  return <section className="content dashboard-content">
+    <div className="welcome"><div><span className="eyebrow">PANEL DE CONTROL</span><h2>Resumen operativo</h2><p>Órdenes activas y próximos mantenimientos.</p></div><div className="welcome-mark"><Wrench size={55} strokeWidth={1.2} /></div></div>
+    {error && <div className="alert error">{error}</div>}
+    <div className="stat-grid dashboard-stats">
+      <Stat icon={UsersRound} label="Propietarios registrados" value={owners.length} />
+      <Stat icon={CarFront} label="Vehículos en control" value={vehicles.length} />
+      <Stat icon={CalendarClock} label="Servicios próximos · 30 días" value={upcomingCount} />
+      <Stat icon={CircleAlert} label="Servicios vencidos" value={overdueCount} accent={overdueCount > 0} />
+    </div>
+    <section className="dashboard-visits">
+      <div className="dashboard-visits-heading"><div><p className="muted">Agenda de mantenimiento</p><h2>Próximos servicios</h2></div><button className="button secondary" onClick={() => onSection("orders")}>Ver órdenes</button></div>
+      {loading ? <div className="empty"><p>Cargando agenda...</p></div> : nextVisits.length === 0 ? <div className="empty"><h3>No hay servicios próximos</h3><p>Las órdenes con fecha estimada aparecerán aquí.</p></div> : <div className="dashboard-visit-list">{nextVisits.map((order) => {
+        const schedule = scheduleFor(order);
+        return <button className="dashboard-visit" key={order.id} onClick={() => onSection("orders")}>
+          <span className={`visit-date ${schedule.daysRemaining <= 7 ? "urgent" : ""}`}>{String(order.fecha_proximo_servicio).slice(0, 10)}</span>
+          <span className="visit-main"><strong>{order.servicio}</strong><small>{order.placa} · {order.marca} {order.modelo} · {Number(order.kilometraje || 0).toLocaleString("es-GT")} km</small></span>
+          <span className={`schedule-badge ${schedule.daysRemaining <= 7 ? "upcoming" : "planned"}`}>{schedule.daysRemaining === 0 ? "Hoy" : `En ${schedule.daysRemaining} días`}</span>
+        </button>;
+      })}</div>}
+    </section>
+    <div className="quick-grid"><QuickCard icon={UsersRound} title="Propietarios" detail="Registra y consulta clientes del taller." count={`${owners.length} registrados`} onClick={() => onSection("owners")} /><QuickCard icon={CarFront} title="Vehículos" detail="Consulta placas y kilometraje al día." count={`${vehicles.length} registrados`} onClick={() => onSection("vehicles")} /></div>
+  </section>;
 }
 function Stat({ icon: Icon, label, value, accent }) { return <div className={`stat ${accent ? "accent" : ""}`}><div className="stat-icon"><Icon size={20} /></div><div><span>{label}</span><strong>{value}</strong></div></div>; }
 function QuickCard({ icon: Icon, title, detail, count, onClick }) { return <button className="quick-card" onClick={onClick}><div className="quick-icon"><Icon size={21} /></div><div className="quick-copy"><h3>{title}</h3><p>{detail}</p><span>{count}</span></div><ChevronRight className="quick-arrow" size={19} /></button>; }
@@ -578,7 +637,9 @@ function ResourceSection({ type, items, search, setSearch, onAdd, onViewHistory 
 
 function Root() {
   const [session, setSession] = useState(getSession);
-  const ticketId = new URLSearchParams(window.location.search).get("ticket");
+  const query = new URLSearchParams(window.location.search);
+  const ticketId = query.get("ticket");
+  const remindersRequested = query.get("recordatorios") === "1";
 
   useEffect(() => {
     const iconLabels = {
@@ -608,9 +669,15 @@ function Root() {
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (remindersRequested) window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
   function login(data) { saveSession(data); setSession(data); }
   function logout() { clearSession(); setSession(null); }
-  return ticketId ? <PublicTicket /> : session ? <App session={session} onLogout={logout} /> : <Login onLogin={login} />;
+  if (ticketId) return <PublicTicket />;
+  if (!session) return <Login onLogin={login} />;
+  return <App session={session} onLogout={logout} initialSection={remindersRequested ? "reminders" : undefined} />;
 }
 
 createRoot(document.getElementById("root")).render(<Root />);

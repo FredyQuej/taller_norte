@@ -18,6 +18,13 @@ export const orderService = {
       body: JSON.stringify(data),
     });
   },
+  updateStatus(token, id, estado) {
+    return httpRequest(`${apiConfig.order}/api/ordenes-servicio/${id}/estado`, {
+      method: "PATCH",
+      headers: bearerHeaders(token),
+      body: JSON.stringify({ estado }),
+    });
+  },
   delete(token, id) {
     return httpRequest(`${apiConfig.order}/api/ordenes-servicio/${id}`, { method: "DELETE", headers: bearerHeaders(token) });
   },
