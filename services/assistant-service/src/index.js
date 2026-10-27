@@ -241,6 +241,169 @@ const tools = {
       return { ventas: result.rows };
     },
   },
+  generar_reporte: {
+    declaration: {
+      name: "generar_reporte",
+      description: "Prepara un reporte descargable del sistema en PDF o Excel. Úsala cuando el usuario pida generar, descargar o exportar un reporte. Requiere identificar tipo de reporte y formato.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          tipo: { type: "STRING", enum: ["ordenes", "propietarios", "vehiculos", "servicios", "existencias", "compras", "ventas", "movimientos"], description: "Tipo de reporte solicitado" },
+          formato: { type: "STRING", enum: ["PDF", "EXCEL"], description: "Formato que pidió el usuario" },
+          desde: { type: "STRING", description: "Fecha inicial AAAA-MM-DD para órdenes, compras, ventas o movimientos" },
+          hasta: { type: "STRING", description: "Fecha final AAAA-MM-DD para órdenes, compras, ventas o movimientos" },
+        },
+        required: ["tipo", "formato"],
+      },
+    },
+    async execute(user, args) {
+      if (!hasPermission(user, "reportes", "consultar")) return { error: "No tienes permiso para generar reportes" };
+      const definitions = {
+        ordenes: { title: "Órdenes de servicio", file: "ordenes", permission: "ordenes", columns: ["Orden", "Ingreso", "Próximo servicio", "Placa", "Vehículo", "Propietario", "Servicio", "Estado", "Prioridad", "Kilometraje", "Mano de obra Q", "Artículos Q", "Total Q"] },
+        propietarios: { title: "Propietarios", file: "propietarios", permission: "propietarios", columns: ["ID", "Nombre", "Tipo", "NIT", "Teléfono", "Correo", "Dirección", "Estado"] },
+        vehiculos: { title: "Vehículos", file: "vehiculos", permission: "vehiculos", columns: ["Placa", "Marca", "Modelo", "Tipo", "Año", "Propietario", "Kilometraje", "Estado"] },
+        servicios: { title: "Catálogo de servicios", file: "servicios", permission: "servicios", columns: ["Servicio", "Descripción", "Precio Q", "Estado"] },
+        existencias: { title: "Existencias actuales", file: "existencias", permission: "inventario", columns: ["Código", "Artículo", "Categoría", "Tipo", "Existencia", "Mínimo", "Costo compra Q", "Costo venta Q", "Valorizado Q", "Estado"] },
+        compras: { title: "Compras de inventario", file: "compras", permission: "inventario", columns: ["Factura", "Proveedor", "Fecha", "Código", "Artículo", "Cantidad", "Costo compra Q", "Costo venta Q", "Subtotal Q"] },
+        ventas: { title: "Ventas de inventario", file: "ventas", permission: "inventario", columns: ["Venta", "Fecha", "Código", "Artículo", "Cantidad", "Costo venta Q", "Subtotal Q"] },
+        movimientos: { title: "Movimientos de inventario", file: "movimientos", permission: "inventario", columns: ["Fecha", "Código", "Artículo", "Movimiento", "Cantidad", "Referencia", "Usuario"] },
+      };
+      const definition = definitions[args.tipo];
+      if (!definition) return { error: "Ese tipo de reporte no está disponible" };
+      if (!hasPermission(user, definition.permission, "consultar")) {
+        return { error: `No tienes permiso de consulta en el módulo ${definition.permission}` };
+      }
+
+      const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+      const desde = validDate(args.desde) ? args.desde : null;
+      const hasta = validDate(args.hasta) ? args.hasta : null;
+      const ownerId = clientOwnerId(user);
+      let rows;
+      let total;
+      let params;
+
+      switch (args.tipo) {
+        case "propietarios": {
+          const result = await pool.query(
+            `SELECT id,nombre,CASE WHEN tipo='EMPRESA' THEN 'Empresa' ELSE 'Individual' END tipo,
+                    COALESCE(nit,'—') nit,COALESCE(telefono,'—') telefono,COALESCE(correo,'—') correo,
+                    COALESCE(direccion,'—') direccion,CASE WHEN activo THEN 'Activo' ELSE 'Inactivo' END estado
+             FROM propietarios WHERE activo ORDER BY nombre LIMIT 5000`,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          total = `${rows.length} propietarios registrados`;
+          break;
+        }
+        case "vehiculos": {
+          params = [ownerId];
+          const result = await pool.query(
+            `SELECT v.placa,v.marca,v.modelo,v.tipo,v.anio,p.nombre propietario,v.kilometraje_actual,
+                    COALESCE(v.estado,'ACTIVO') estado
+             FROM vehiculos v JOIN propietarios p ON p.id=v.propietario_id
+             WHERE ($1::bigint IS NULL OR p.id=$1) ORDER BY v.id DESC LIMIT 5000`, params,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          total = `${rows.length} vehículos registrados`;
+          break;
+        }
+        case "servicios": {
+          const result = await pool.query(
+            `SELECT nombre,COALESCE(descripcion,'—') descripcion,precio,CASE WHEN activo THEN 'Activo' ELSE 'Inactivo' END estado
+             FROM servicios ORDER BY nombre LIMIT 5000`,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          total = `${rows.length} servicios en catálogo`;
+          break;
+        }
+        case "ordenes": {
+          params = [desde, hasta, ownerId];
+          const result = await pool.query(
+            `SELECT 'OS-'||LPAD(os.id::text,4,'0'),os.fecha_ingreso,COALESCE(os.fecha_proximo_servicio::text,'—'),
+                    v.placa,v.marca||' '||v.modelo,p.nombre,s.nombre,os.estado,os.prioridad,os.kilometraje,
+                    os.costo,COALESCE((SELECT SUM(oa.cantidad*oa.precio_venta_unitario) FROM ordenes_articulos oa WHERE oa.orden_servicio_id=os.id),0),
+                    ${orderTotal}
+             FROM ordenes_servicio os JOIN vehiculos v ON v.id=os.vehiculo_id
+             JOIN propietarios p ON p.id=v.propietario_id JOIN servicios s ON s.id=os.servicio_id
+             WHERE ($1::date IS NULL OR os.fecha_ingreso >= $1) AND ($2::date IS NULL OR os.fecha_ingreso <= $2)
+               AND ($3::bigint IS NULL OR p.id=$3)
+             ORDER BY os.id DESC LIMIT 5000`, params,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          const billed = result.rows.reduce((sum, row) => sum + Number(row.costo_total || 0), 0);
+          total = `${rows.length} órdenes · Total Q ${billed.toFixed(2)}`;
+          break;
+        }
+        case "existencias": {
+          const result = await pool.query(
+            `SELECT COALESCE(sku,'—'),nombre,COALESCE(categoria,'—'),CASE WHEN tipo='REPUESTO' THEN 'Repuesto' ELSE 'Accesorio' END,
+                    stock_actual,stock_minimo,precio_compra,precio_venta,stock_actual*precio_compra,
+                    CASE WHEN activo THEN 'Activo' ELSE 'Inactivo' END
+             FROM inventario_articulos ORDER BY nombre LIMIT 5000`,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          const valued = result.rows.reduce((sum, row) => sum + Number(row[8] || 0), 0);
+          total = `Inventario valorizado Q ${valued.toFixed(2)}`;
+          break;
+        }
+        case "compras": {
+          params = [desde, hasta];
+          const result = await pool.query(
+            `SELECT c.numero_factura,COALESCE(c.proveedor,'—'),c.creado_en::date,COALESCE(a.sku,'—'),a.nombre,
+                    d.cantidad,d.costo_compra,d.precio_venta,d.subtotal
+             FROM compras_inventario c JOIN compras_inventario_detalle d ON d.compra_id=c.id
+             JOIN inventario_articulos a ON a.id=d.articulo_id
+             WHERE ($1::date IS NULL OR c.creado_en::date >= $1) AND ($2::date IS NULL OR c.creado_en::date <= $2)
+             ORDER BY c.id DESC LIMIT 5000`, params,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          total = `${rows.length} líneas de compra`;
+          break;
+        }
+        case "ventas": {
+          params = [desde, hasta];
+          const result = await pool.query(
+            `SELECT 'VT-'||LPAD(v.id::text,4,'0'),v.creado_en::date,COALESCE(a.sku,'—'),a.nombre,d.cantidad,d.precio_venta,d.subtotal
+             FROM ventas_inventario v JOIN ventas_inventario_detalle d ON d.venta_id=v.id
+             JOIN inventario_articulos a ON a.id=d.articulo_id
+             WHERE ($1::date IS NULL OR v.creado_en::date >= $1) AND ($2::date IS NULL OR v.creado_en::date <= $2)
+             ORDER BY v.id DESC LIMIT 5000`, params,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          total = `${rows.length} líneas de venta`;
+          break;
+        }
+        case "movimientos": {
+          params = [desde, hasta];
+          const result = await pool.query(
+            `SELECT m.creado_en,COALESCE(a.sku,'—'),a.nombre,
+                    CASE WHEN m.tipo='CONSUMO_ORDEN' THEN 'Consumo en orden' WHEN m.tipo='ENTRADA' THEN 'Ingreso' ELSE 'Salida' END,
+                    m.cantidad,COALESCE('OS-'||LPAD(m.orden_servicio_id::text,4,'0'),m.referencia,'—'),COALESCE(u.nombre,'Sistema')
+             FROM movimientos_inventario m JOIN inventario_articulos a ON a.id=m.articulo_id
+             LEFT JOIN usuarios u ON u.id=m.usuario_id
+             WHERE ($1::date IS NULL OR m.creado_en::date >= $1) AND ($2::date IS NULL OR m.creado_en::date <= $2)
+             ORDER BY m.id DESC LIMIT 5000`, params,
+          );
+          rows = result.rows.map((row) => Object.values(row));
+          total = `${rows.length} movimientos`;
+          break;
+        }
+      }
+
+      const format = String(args.formato || "PDF").toUpperCase() === "EXCEL" ? "EXCEL" : "PDF";
+      const dateSuffix = desde || hasta ? `-${desde || "inicio"}-${hasta || "hoy"}` : "";
+      return {
+        reportRequest: {
+          title: definition.title,
+          fileName: `${definition.file}${dateSuffix}`,
+          format,
+          columns: definition.columns,
+          rows,
+          total,
+          period: desde || hasta ? `Período: ${desde || "inicio"} a ${hasta || "hoy"}` : "Reporte actual",
+        },
+      };
+    },
+  },
   crear_propietario: {
     declaration: {
       name: "crear_propietario",
@@ -443,6 +606,12 @@ app.post("/api/asistente/chat", authenticateToken, async (req, res) => {
       if (!tool) return res.json({ text: "Esa consulta no está disponible en el asistente." });
 
       const result = await tool.execute(req.user, args || {});
+      if (result.reportRequest) {
+        return res.json({
+          text: `Preparé el reporte de ${result.reportRequest.title} en formato ${result.reportRequest.format}. Descárgalo desde este mensaje.`,
+          reportRequest: result.reportRequest,
+        });
+      }
       if (result.pendingAction) {
         return res.json({
           text: `Esta es la acción que preparé. Revisa los datos y confírmala para registrarla:`,
