@@ -26,4 +26,32 @@ export const inventoryService = {
       body: JSON.stringify(data),
     });
   },
+  listPurchases(token, { desde, hasta } = {}) {
+    const params = new URLSearchParams();
+    if (desde) params.set("desde", desde);
+    if (hasta) params.set("hasta", hasta);
+    const query = params.toString() ? `?${params}` : "";
+    return httpRequest(`${apiConfig.order}/api/inventario/compras${query}`, { headers: bearerHeaders(token) });
+  },
+  createPurchase(token, data) {
+    return httpRequest(`${apiConfig.order}/api/inventario/compras`, {
+      method: "POST",
+      headers: bearerHeaders(token),
+      body: JSON.stringify(data),
+    });
+  },
+  listSales(token, { desde, hasta } = {}) {
+    const params = new URLSearchParams();
+    if (desde) params.set("desde", desde);
+    if (hasta) params.set("hasta", hasta);
+    const query = params.toString() ? `?${params}` : "";
+    return httpRequest(`${apiConfig.order}/api/inventario/ventas${query}`, { headers: bearerHeaders(token) });
+  },
+  createSale(token, data) {
+    return httpRequest(`${apiConfig.order}/api/inventario/ventas`, {
+      method: "POST",
+      headers: bearerHeaders(token),
+      body: JSON.stringify(data),
+    });
+  },
 };

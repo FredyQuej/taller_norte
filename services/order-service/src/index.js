@@ -201,15 +201,15 @@ app.get('/api/inventario/articulos', authenticateToken, requirePermission('inven
 });
 
 app.post('/api/inventario/articulos', authenticateToken, requirePermission('inventario', 'crear'), async (req, res) => {
-  const { sku = null, nombre, tipo, descripcion = null, unidad = 'unidad', stock_minimo = 0, precio_compra = 0, precio_venta = 0 } = req.body;
+  const { sku = null, nombre, categoria = null, tipo, descripcion = null, unidad = 'unidad', stock_minimo = 0, precio_compra = 0, precio_venta = 0 } = req.body;
   if (!nombre?.trim() || !['REPUESTO', 'ACCESORIO'].includes(tipo) || ![stock_minimo, precio_compra, precio_venta].every((value) => Number.isFinite(Number(value)) && Number(value) >= 0)) {
     return res.status(400).json({ error: 'Nombre, tipo, stock mínimo y precios válidos son obligatorios' });
   }
   try {
     const result = await pool.query(
-      `INSERT INTO inventario_articulos(sku,nombre,tipo,descripcion,unidad,stock_minimo,precio_compra,precio_venta)
-       VALUES(NULLIF(TRIM($1),''),$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [sku, nombre.trim(), tipo, descripcion, unidad, Number(stock_minimo), Number(precio_compra), Number(precio_venta)],
+      `INSERT INTO inventario_articulos(sku,nombre,categoria,tipo,descripcion,unidad,stock_minimo,precio_compra,precio_venta)
+       VALUES(NULLIF(TRIM($1),''),$2,NULLIF(TRIM($3),''),$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [sku, nombre.trim(), categoria, tipo, descripcion, unidad, Number(stock_minimo), Number(precio_compra), Number(precio_venta)],
     );
     return res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -220,16 +220,16 @@ app.post('/api/inventario/articulos', authenticateToken, requirePermission('inve
 });
 
 app.put('/api/inventario/articulos/:id', authenticateToken, requirePermission('inventario', 'editar'), async (req, res) => {
-  const { sku = null, nombre, tipo, descripcion = null, unidad = 'unidad', stock_minimo = 0, precio_compra = 0, precio_venta = 0, activo = true } = req.body;
+  const { sku = null, nombre, categoria = null, tipo, descripcion = null, unidad = 'unidad', stock_minimo = 0, precio_compra = 0, precio_venta = 0, activo = true } = req.body;
   if (!nombre?.trim() || !['REPUESTO', 'ACCESORIO'].includes(tipo) || ![stock_minimo, precio_compra, precio_venta].every((value) => Number.isFinite(Number(value)) && Number(value) >= 0)) {
     return res.status(400).json({ error: 'Nombre, tipo, stock mínimo y precios válidos son obligatorios' });
   }
   try {
     const result = await pool.query(
-      `UPDATE inventario_articulos SET sku=NULLIF(TRIM($1),''), nombre=$2, tipo=$3, descripcion=$4,
-       unidad=$5, stock_minimo=$6, precio_compra=$7, precio_venta=$8, activo=$9, actualizado_en=NOW()
-       WHERE id=$10 RETURNING *`,
-      [sku, nombre.trim(), tipo, descripcion, unidad, Number(stock_minimo), Number(precio_compra), Number(precio_venta), !!activo, req.params.id],
+      `UPDATE inventario_articulos SET sku=NULLIF(TRIM($1),''), nombre=$2, categoria=NULLIF(TRIM($3),''), tipo=$4, descripcion=$5,
+       unidad=$6, stock_minimo=$7, precio_compra=$8, precio_venta=$9, activo=$10, actualizado_en=NOW()
+       WHERE id=$11 RETURNING *`,
+      [sku, nombre.trim(), categoria, tipo, descripcion, unidad, Number(stock_minimo), Number(precio_compra), Number(precio_venta), !!activo, req.params.id],
     );
     if (!result.rowCount) return res.status(404).json({ error: 'Artículo no encontrado' });
     return res.json(result.rows[0]);
@@ -309,6 +309,178 @@ app.post('/api/inventario/movimientos', authenticateToken, requirePermission('in
     await db.query('ROLLBACK').catch(() => {});
     console.error('Error recording inventory movement:', error);
     return res.status(500).json({ error: 'Error al registrar movimiento de inventario' });
+  } finally {
+    db.release();
+  }
+});
+
+app.get('/api/inventario/compras', authenticateToken, requirePermission('inventario', 'consultar'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.*, u.nombre usuario,
+              COALESCE((
+                SELECT json_agg(json_build_object(
+                  'id', d.id, 'articulo_id', d.articulo_id, 'sku', a.sku, 'articulo', a.nombre,
+                  'cantidad', d.cantidad, 'costo_compra', d.costo_compra, 'precio_venta', d.precio_venta, 'subtotal', d.subtotal
+                ) ORDER BY d.id)
+                FROM compras_inventario_detalle d
+                JOIN inventario_articulos a ON a.id = d.articulo_id
+                WHERE d.compra_id = c.id
+              ), '[]'::json) lineas
+       FROM compras_inventario c
+       LEFT JOIN usuarios u ON u.id = c.usuario_id
+       WHERE ($1::date IS NULL OR c.creado_en::date >= $1)
+         AND ($2::date IS NULL OR c.creado_en::date <= $2)
+       ORDER BY c.id DESC
+       LIMIT 300`,
+      [req.query.desde || null, req.query.hasta || null],
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Error listing purchases:', error);
+    return res.status(500).json({ error: 'Error al consultar compras' });
+  }
+});
+
+app.post('/api/inventario/compras', authenticateToken, requirePermission('inventario', 'crear'), async (req, res) => {
+  const { numero_factura, proveedor = null, observaciones = null, lineas } = req.body;
+  if (!numero_factura?.trim() || !Array.isArray(lineas) || !lineas.length) {
+    return res.status(400).json({ error: 'Número de factura y al menos un artículo son obligatorios' });
+  }
+  const parsedLines = [];
+  for (const line of lineas) {
+    const articuloId = Number(line.articulo_id);
+    const cantidad = Number(line.cantidad);
+    const costoCompra = Number(line.costo_compra);
+    const precioVenta = Number(line.precio_venta);
+    if (!Number.isInteger(articuloId) || articuloId <= 0 || !Number.isFinite(cantidad) || cantidad <= 0
+      || !Number.isFinite(costoCompra) || costoCompra < 0 || !Number.isFinite(precioVenta) || precioVenta < 0) {
+      return res.status(400).json({ error: 'Cada línea requiere artículo, cantidad, costo de compra y costo de venta válidos' });
+    }
+    parsedLines.push({ articulo_id: articuloId, cantidad, costo_compra: costoCompra, precio_venta: precioVenta, subtotal: cantidad * costoCompra });
+  }
+  const total = parsedLines.reduce((sum, line) => sum + line.subtotal, 0);
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const purchase = await db.query(
+      `INSERT INTO compras_inventario(numero_factura,proveedor,usuario_id,total,observaciones)
+       VALUES($1,$2,$3,$4,$5) RETURNING *`,
+      [numero_factura.trim(), proveedor, req.user.sub, total, observaciones],
+    );
+    for (const line of parsedLines) {
+      const articleResult = await db.query('SELECT id FROM inventario_articulos WHERE id=$1 AND activo=TRUE FOR UPDATE', [line.articulo_id]);
+      if (!articleResult.rowCount) throw Object.assign(new Error(`El artículo ${line.articulo_id} no existe o está inactivo`), { statusCode: 404 });
+      await db.query(
+        `UPDATE inventario_articulos SET stock_actual=stock_actual+$1, precio_compra=$2, precio_venta=$3, actualizado_en=NOW() WHERE id=$4`,
+        [line.cantidad, line.costo_compra, line.precio_venta, line.articulo_id],
+      );
+      await db.query(
+        `INSERT INTO compras_inventario_detalle(compra_id,articulo_id,cantidad,costo_compra,precio_venta,subtotal)
+         VALUES($1,$2,$3,$4,$5,$6)`,
+        [purchase.rows[0].id, line.articulo_id, line.cantidad, line.costo_compra, line.precio_venta, line.subtotal],
+      );
+      await db.query(
+        `INSERT INTO movimientos_inventario(articulo_id,usuario_id,compra_id,tipo,cantidad,costo_unitario,referencia,observaciones)
+         VALUES($1,$2,$3,'ENTRADA',$4,$5,$6,$7)`,
+        [line.articulo_id, req.user.sub, purchase.rows[0].id, line.cantidad, line.costo_compra, numero_factura.trim(), 'Ingreso por compra'],
+      );
+    }
+    await db.query('COMMIT');
+    return res.status(201).json({ ...purchase.rows[0], lineas: parsedLines });
+  } catch (error) {
+    await db.query('ROLLBACK').catch(() => {});
+    console.error('Error creating purchase:', error);
+    return res.status(error.statusCode || 500).json({ error: error.message || 'Error al registrar la compra' });
+  } finally {
+    db.release();
+  }
+});
+
+app.get('/api/inventario/ventas', authenticateToken, requirePermission('inventario', 'consultar'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT v.*, u.nombre usuario,
+              COALESCE((
+                SELECT json_agg(json_build_object(
+                  'id', d.id, 'articulo_id', d.articulo_id, 'sku', a.sku, 'articulo', a.nombre,
+                  'cantidad', d.cantidad, 'precio_venta', d.precio_venta, 'subtotal', d.subtotal
+                ) ORDER BY d.id)
+                FROM ventas_inventario_detalle d
+                JOIN inventario_articulos a ON a.id = d.articulo_id
+                WHERE d.venta_id = v.id
+              ), '[]'::json) lineas
+       FROM ventas_inventario v
+       LEFT JOIN usuarios u ON u.id = v.usuario_id
+       WHERE ($1::date IS NULL OR v.creado_en::date >= $1)
+         AND ($2::date IS NULL OR v.creado_en::date <= $2)
+       ORDER BY v.id DESC
+       LIMIT 300`,
+      [req.query.desde || null, req.query.hasta || null],
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Error listing sales:', error);
+    return res.status(500).json({ error: 'Error al consultar ventas' });
+  }
+});
+
+app.post('/api/inventario/ventas', authenticateToken, requirePermission('inventario', 'crear'), async (req, res) => {
+  const { observaciones = null, lineas } = req.body;
+  if (!Array.isArray(lineas) || !lineas.length) {
+    return res.status(400).json({ error: 'Agregue al menos un artículo a la venta' });
+  }
+  const parsedLines = [];
+  for (const line of lineas) {
+    const articuloId = Number(line.articulo_id);
+    const cantidad = Number(line.cantidad);
+    const precioVenta = line.precio_venta === undefined || line.precio_venta === null || line.precio_venta === '' ? null : Number(line.precio_venta);
+    if (!Number.isInteger(articuloId) || articuloId <= 0 || !Number.isFinite(cantidad) || cantidad <= 0
+      || (precioVenta !== null && (!Number.isFinite(precioVenta) || precioVenta < 0))) {
+      return res.status(400).json({ error: 'Cada línea requiere artículo, cantidad y precio de venta válidos' });
+    }
+    parsedLines.push({ articulo_id: articuloId, cantidad, precio_venta: precioVenta });
+  }
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    const sale = await db.query(
+      `INSERT INTO ventas_inventario(usuario_id,total,observaciones) VALUES($1,0,$2) RETURNING *`,
+      [req.user.sub, observaciones],
+    );
+    let total = 0;
+    for (const line of parsedLines) {
+      const articleResult = await db.query(
+        'SELECT id,nombre,unidad,stock_actual,precio_compra,precio_venta FROM inventario_articulos WHERE id=$1 AND activo=TRUE FOR UPDATE',
+        [line.articulo_id],
+      );
+      if (!articleResult.rowCount) throw Object.assign(new Error(`El artículo ${line.articulo_id} no existe o está inactivo`), { statusCode: 404 });
+      const article = articleResult.rows[0];
+      if (Number(article.stock_actual) < line.cantidad) {
+        throw Object.assign(new Error(`Stock insuficiente para ${article.nombre}. Disponible: ${article.stock_actual}`), { statusCode: 409 });
+      }
+      const unitPrice = line.precio_venta ?? Number(article.precio_venta);
+      const subtotal = line.cantidad * unitPrice;
+      total += subtotal;
+      await db.query('UPDATE inventario_articulos SET stock_actual=stock_actual-$1, actualizado_en=NOW() WHERE id=$2', [line.cantidad, article.id]);
+      await db.query(
+        `INSERT INTO ventas_inventario_detalle(venta_id,articulo_id,cantidad,precio_venta,subtotal)
+         VALUES($1,$2,$3,$4,$5)`,
+        [sale.rows[0].id, article.id, line.cantidad, unitPrice, subtotal],
+      );
+      await db.query(
+        `INSERT INTO movimientos_inventario(articulo_id,usuario_id,venta_id,tipo,cantidad,costo_unitario,referencia,observaciones)
+         VALUES($1,$2,$3,'SALIDA',$4,$5,$6,$7)`,
+        [article.id, req.user.sub, sale.rows[0].id, line.cantidad, article.precio_compra, `VT-${String(sale.rows[0].id).padStart(4, '0')}`, 'Salida por venta'],
+      );
+    }
+    await db.query('UPDATE ventas_inventario SET total=$1 WHERE id=$2', [total, sale.rows[0].id]);
+    await db.query('COMMIT');
+    return res.status(201).json({ ...sale.rows[0], total });
+  } catch (error) {
+    await db.query('ROLLBACK').catch(() => {});
+    console.error('Error creating sale:', error);
+    return res.status(error.statusCode || 500).json({ error: error.message || 'Error al registrar la venta' });
   } finally {
     db.release();
   }

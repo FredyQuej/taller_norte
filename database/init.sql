@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS inventario_articulos (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   sku VARCHAR(60) UNIQUE,
   nombre VARCHAR(150) NOT NULL,
+  categoria VARCHAR(80),
   tipo VARCHAR(20) NOT NULL CHECK (tipo IN ('REPUESTO','ACCESORIO')),
   descripcion TEXT,
   unidad VARCHAR(30) NOT NULL DEFAULT 'unidad',
@@ -96,6 +97,8 @@ CREATE TABLE IF NOT EXISTS inventario_articulos (
   creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE inventario_articulos ADD COLUMN IF NOT EXISTS categoria VARCHAR(80);
 
 CREATE TABLE IF NOT EXISTS ordenes_articulos (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -122,6 +125,49 @@ CREATE TABLE IF NOT EXISTS movimientos_inventario (
 
 CREATE INDEX IF NOT EXISTS idx_ordenes_articulos_orden ON ordenes_articulos(orden_servicio_id);
 CREATE INDEX IF NOT EXISTS idx_movimientos_inventario_articulo ON movimientos_inventario(articulo_id, creado_en DESC);
+
+CREATE TABLE IF NOT EXISTS compras_inventario (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  numero_factura VARCHAR(60) NOT NULL,
+  proveedor VARCHAR(150),
+  usuario_id BIGINT REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL,
+  total NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (total >= 0),
+  observaciones TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS compras_inventario_detalle (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  compra_id BIGINT NOT NULL REFERENCES compras_inventario(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  articulo_id BIGINT NOT NULL REFERENCES inventario_articulos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  cantidad NUMERIC(12,2) NOT NULL CHECK (cantidad > 0),
+  costo_compra NUMERIC(12,2) NOT NULL CHECK (costo_compra >= 0),
+  precio_venta NUMERIC(12,2) NOT NULL CHECK (precio_venta >= 0),
+  subtotal NUMERIC(12,2) NOT NULL CHECK (subtotal >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS ventas_inventario (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  usuario_id BIGINT REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL,
+  total NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (total >= 0),
+  observaciones TEXT,
+  creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ventas_inventario_detalle (
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  venta_id BIGINT NOT NULL REFERENCES ventas_inventario(id) ON UPDATE CASCADE ON DELETE CASCADE,
+  articulo_id BIGINT NOT NULL REFERENCES inventario_articulos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+  cantidad NUMERIC(12,2) NOT NULL CHECK (cantidad > 0),
+  precio_venta NUMERIC(12,2) NOT NULL CHECK (precio_venta >= 0),
+  subtotal NUMERIC(12,2) NOT NULL CHECK (subtotal >= 0)
+);
+
+ALTER TABLE movimientos_inventario ADD COLUMN IF NOT EXISTS compra_id BIGINT REFERENCES compras_inventario(id) ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE movimientos_inventario ADD COLUMN IF NOT EXISTS venta_id BIGINT REFERENCES ventas_inventario(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_compras_inventario_fecha ON compras_inventario(creado_en DESC);
+CREATE INDEX IF NOT EXISTS idx_ventas_inventario_fecha ON ventas_inventario(creado_en DESC);
 
 CREATE TABLE IF NOT EXISTS recordatorios_servicio (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

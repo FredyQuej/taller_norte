@@ -19,20 +19,24 @@ app.use(express.json({ limit: "100kb" }));
 
 const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-const permissionModules = ["propietarios", "vehiculos", "servicios", "ordenes", "inventario", "usuarios"];
+const permissionModules = ["propietarios", "vehiculos", "servicios", "ordenes", "inventario", "reportes", "usuarios"];
 const permissionActions = ["consultar", "crear", "editar", "eliminar"];
 const fullPermissions = Object.fromEntries(permissionModules.map((module) => [module, Object.fromEntries(permissionActions.map((action) => [action, true]))]));
 const defaultPermissions = {
   RECEPCIONISTA: { propietarios: { consultar: true }, vehiculos: { consultar: true }, servicios: { consultar: true }, ordenes: { consultar: true, crear: true }, inventario: { consultar: true } },
-  ENCARGADO: { propietarios: { consultar: true, crear: true, editar: true }, vehiculos: { consultar: true, crear: true, editar: true }, servicios: { consultar: true, crear: true, editar: true }, ordenes: { consultar: true, crear: true, editar: true }, inventario: { consultar: true, crear: true, editar: true } },
+  ENCARGADO: { propietarios: { consultar: true, crear: true, editar: true }, vehiculos: { consultar: true, crear: true, editar: true }, servicios: { consultar: true, crear: true, editar: true }, ordenes: { consultar: true, crear: true, editar: true }, inventario: { consultar: true, crear: true, editar: true }, reportes: { consultar: true } },
   ADMIN: fullPermissions,
   SUPER_USUARIO: fullPermissions,
   CLIENTE: { ordenes: { consultar: true } },
 };
 
 function normalizePermissions(role, permissions) {
-  const base = permissions && typeof permissions === "object" ? permissions : defaultPermissions[role] || {};
-  return Object.fromEntries(permissionModules.map((module) => [module, Object.fromEntries(permissionActions.map((action) => [action, base[module]?.[action] === true]))]));
+  const stored = permissions && typeof permissions === "object" ? permissions : {};
+  const defaults = defaultPermissions[role] || {};
+  return Object.fromEntries(permissionModules.map((module) => {
+    const source = stored[module] !== undefined ? stored[module] : defaults[module];
+    return [module, Object.fromEntries(permissionActions.map((action) => [action, source?.[action] === true]))];
+  }));
 }
 
 const sign = (u) =>

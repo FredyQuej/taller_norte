@@ -84,6 +84,20 @@ services:
       postgres:
         condition: service_healthy
 
+  assistant-service:
+    build: ./services/assistant-service
+    environment:
+      PORT: 3005
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mantenimiento}:${POSTGRES_PASSWORD:-mantenimiento123}@postgres:5432/${POSTGRES_DB:-control_mantenimiento}
+      JWT_SECRET: ${JWT_SECRET:-clave_desarrollo_no_usar_en_produccion}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      GEMINI_FALLBACK_MODELS: ${GEMINI_FALLBACK_MODELS:-gemini-3.5-flash,gemini-3.1-flash-lite}
+    ports: ["3005:3005"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     ports: ["${FRONTEND_PORT:-3000}:80"]
@@ -95,6 +109,8 @@ services:
       service-service:
         condition: service_started
       order-service:
+        condition: service_started
+      assistant-service:
         condition: service_started
 
 volumes:
