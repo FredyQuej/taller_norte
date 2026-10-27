@@ -2,6 +2,10 @@
 
 Incluye PostgreSQL, autenticación JWT y microservicio de propietarios/vehículos.
 
+## Despliegue en Ubuntu / VMware
+
+Para instalar el sistema en un servidor Ubuntu y habilitar acceso desde otros dispositivos, sigue la [guía de despliegue en Ubuntu/VMware](docs/DEPLOY_UBUNTU_VMWARE.md). La configuración de producción publica el frontend por HTTP y mantiene la base de datos y las APIs internas sin puertos expuestos.
+
 ## Requisitos
 - Visual Studio Code
 - Docker Desktop con Docker Compose
